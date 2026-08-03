@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QInputDialog,
     QMessageBox,
     QScrollArea,
@@ -144,6 +145,58 @@ def test_canceling_custom_value_restores_previous_selection(qt_app, monkeypatch)
     window.polarity_combo.setCurrentIndex(window.polarity_combo.count() - 1)
 
     assert window.polarity_combo.currentText() == "neg"
+
+
+def test_import_csv_registers_custom_metadata_values(qt_app, tmp_path, monkeypatch):
+    csv_path = tmp_path / "custom-clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "cam02.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam_02_doorway-dog_out-needs_review-night_red-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV files (*.csv)")),
+    )
+
+    window.import_csv()
+
+    assert window.view_combo.currentText() == "doorway"
+    assert window.polarity_combo.findText("needs_review") >= 0
+    assert window.lighting_combo.findText("night_red") >= 0
+
+
+def test_selecting_custom_metadata_record_restores_all_metadata_combos(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="cam02.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output=(
+                "20260729-cam_02_doorway-dog_out-needs_review-night_red-001.mp4"
+            ),
+            behaviors=("dog_out",),
+            polarity="needs_review",
+            lighting="night_red",
+            sequence=1,
+        )
+    ]
+    window._refresh_table()
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window.date_edit.text() == "20260729"
+    assert window.camera_edit.text() == "cam_02"
+    assert window.view_combo.currentText() == "doorway"
+    assert window.polarity_combo.currentText() == "needs_review"
+    assert window.lighting_combo.currentText() == "night_red"
 
 
 def test_task_table_displays_chinese_status_without_changing_record_status(qt_app):

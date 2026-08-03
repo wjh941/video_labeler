@@ -45,6 +45,7 @@ from ..models import (
     ProjectMetadata,
 )
 from ..naming import (
+    ParsedFilename,
     build_filename,
     next_sequence,
     normalize_label_token,
@@ -538,6 +539,25 @@ class MainWindow(QMainWindow):
         combo.setCurrentIndex(index)
         combo.setProperty("last_valid_index", index)
 
+    def _restore_parsed_metadata(self, parsed: ParsedFilename) -> None:
+        self.date_edit.setText(parsed.metadata.date)
+        self.camera_edit.setText(parsed.metadata.camera)
+        self._set_custom_combo_value(
+            self.view_combo,
+            parsed.metadata.view,
+            normalize_view_token,
+        )
+        self._set_custom_combo_value(
+            self.polarity_combo,
+            parsed.polarity,
+            lambda value: normalize_label_token(value, "polarity"),
+        )
+        self._set_custom_combo_value(
+            self.lighting_combo,
+            parsed.lighting,
+            lambda value: normalize_label_token(value, "lighting"),
+        )
+
     def _connect_signals(self) -> None:
         self.open_video_button.clicked.connect(self.open_video)
         self.import_csv_button.clicked.connect(self.import_csv)
@@ -615,11 +635,30 @@ class MainWindow(QMainWindow):
         if self.records:
             self.source_name = self.records[0].source
             self.source_label.setText(self.source_name)
-            parsed = parse_filename(self.records[0].output)
-            if parsed:
-                self.date_edit.setText(parsed.metadata.date)
-                self.camera_edit.setText(parsed.metadata.camera)
-                self.view_combo.setCurrentText(parsed.metadata.view)
+            first_parsed: ParsedFilename | None = None
+            for record in self.records:
+                parsed = parse_filename(record.output)
+                if parsed is None:
+                    continue
+                if first_parsed is None:
+                    first_parsed = parsed
+                self._set_custom_combo_value(
+                    self.view_combo,
+                    parsed.metadata.view,
+                    normalize_view_token,
+                )
+                self._set_custom_combo_value(
+                    self.polarity_combo,
+                    parsed.polarity,
+                    lambda value: normalize_label_token(value, "polarity"),
+                )
+                self._set_custom_combo_value(
+                    self.lighting_combo,
+                    parsed.lighting,
+                    lambda value: normalize_label_token(value, "lighting"),
+                )
+            if first_parsed is not None:
+                self._restore_parsed_metadata(first_parsed)
             self.sequence_spin.setValue(
                 next_sequence([record.sequence for record in self.records])
             )
@@ -858,10 +897,9 @@ class MainWindow(QMainWindow):
         self.sequence_spin.setValue(max(1, record.sequence))
         for behavior, checkbox in self.behavior_checks.items():
             checkbox.setChecked(behavior in record.behaviors)
-        if record.polarity in POLARITIES:
-            self.polarity_combo.setCurrentText(record.polarity)
-        if record.lighting in LIGHTING_VALUES:
-            self.lighting_combo.setCurrentText(record.lighting)
+        parsed = parse_filename(record.output)
+        if parsed is not None:
+            self._restore_parsed_metadata(parsed)
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()
