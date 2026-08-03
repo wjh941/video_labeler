@@ -85,69 +85,160 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget(self)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(14, 12, 14, 12)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setSpacing(8)
 
         root_layout.addWidget(self._build_project_header())
 
-        editor_splitter = QSplitter(Qt.Orientation.Horizontal)
-        editor_splitter.setChildrenCollapsible(False)
-        editor_splitter.addWidget(self._build_video_panel())
-        editor_splitter.addWidget(self._build_clip_editor())
-        editor_splitter.setSizes([940, 360])
-        root_layout.addWidget(editor_splitter, stretch=3)
+        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.editor_splitter.setChildrenCollapsible(False)
+        self.editor_splitter.addWidget(self._build_video_panel())
 
-        root_layout.addWidget(self._build_task_table(), stretch=2)
+        self.annotation_panel = self._build_clip_editor()
+        self.annotation_scroll = QScrollArea()
+        self.annotation_scroll.setWidget(self.annotation_panel)
+        self.annotation_scroll.setWidgetResizable(True)
+        self.annotation_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.annotation_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.editor_splitter.addWidget(self.annotation_scroll)
+        self.editor_splitter.setSizes([980, 380])
+
+        self.workspace_splitter.addWidget(self.editor_splitter)
+        self.workspace_splitter.addWidget(self._build_task_table())
+        self.workspace_splitter.setSizes([520, 340])
+        self.workspace_splitter.setStretchFactor(0, 3)
+        self.workspace_splitter.setStretchFactor(1, 2)
+        root_layout.addWidget(self.workspace_splitter, stretch=1)
         root_layout.addLayout(self._build_export_status())
 
         self.setCentralWidget(root)
         self.setStyleSheet(
             """
-            QMainWindow { background: #f4f6f8; }
+            QMainWindow, QMessageBox { background: #111827; color: #f1f5f9; }
+            QWidget { color: #f1f5f9; }
             QGroupBox {
-                background: #ffffff;
-                border: 1px solid #cfd6dd;
-                border-radius: 6px;
-                margin-top: 10px;
+                background: #18212d;
+                border: 1px solid #334155;
+                border-radius: 5px;
+                margin-top: 8px;
                 font-weight: 600;
-                padding: 8px;
+                padding: 7px;
+                color: #f1f5f9;
             }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-            QPushButton { min-height: 28px; padding: 4px 10px; }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 9px;
+                padding: 0 4px;
+                color: #dce5ef;
+            }
+            QPushButton {
+                min-height: 28px;
+                padding: 4px 10px;
+                background: #253244;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                color: #f1f5f9;
+            }
+            QPushButton:hover { background: #334155; border-color: #64748b; }
+            QPushButton:pressed { background: #1e293b; }
+            QPushButton:disabled { background: #1f2937; color: #64748b; border-color: #334155; }
+            QPushButton#primaryButton { background: #2563eb; border-color: #3b82f6; color: #ffffff; }
+            QPushButton#primaryButton:hover { background: #1d4ed8; }
+            QPushButton#addClipButton { background: #0f9f8c; border-color: #2dd4bf; color: #ffffff; }
+            QPushButton#addClipButton:hover { background: #0f8a7a; }
+            QPushButton#dangerButton { background: #512033; border-color: #dc4c64; color: #fecdd3; }
+            QPushButton#dangerButton:hover { background: #70243b; }
             QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-                min-height: 26px;
-                background: #ffffff;
+                min-height: 25px;
+                padding: 1px 6px;
+                background: #101923;
+                color: #f1f5f9;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                selection-background-color: #2563eb;
             }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+                border: 1px solid #60a5fa;
+            }
+            QComboBox QAbstractItemView {
+                background: #18212d;
+                color: #f1f5f9;
+                border: 1px solid #475569;
+                selection-background-color: #1d4f7a;
+            }
+            QCheckBox { color: #dce5ef; spacing: 6px; }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                background: #101923;
+                border: 1px solid #64748b;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background: #2563eb;
+                border-color: #60a5fa;
+            }
+            QScrollArea { background: #18212d; border: 1px solid #334155; border-radius: 5px; }
+            QScrollBar:vertical { background: #111827; width: 11px; margin: 2px; }
+            QScrollBar::handle:vertical { background: #475569; min-height: 28px; border-radius: 4px; }
+            QScrollBar::handle:vertical:hover { background: #64748b; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
             QTableWidget {
-                background: #ffffff;
-                gridline-color: #d7dde3;
-                selection-background-color: #cfe8ff;
-                selection-color: #1f2933;
+                background: #101923;
+                color: #f1f5f9;
+                gridline-color: #334155;
+                selection-background-color: #1d4f7a;
+                selection-color: #ffffff;
             }
+            QTableWidget::item { padding: 2px 5px; }
+            QTableWidget::item:selected { background: #1d4f7a; color: #ffffff; }
             QHeaderView::section {
-                background: #e8edf2;
+                background: #253244;
+                color: #dce5ef;
                 border: 0;
-                border-right: 1px solid #cfd6dd;
-                border-bottom: 1px solid #cfd6dd;
-                padding: 5px;
+                border-right: 1px solid #475569;
+                border-bottom: 1px solid #475569;
+                padding: 4px;
                 font-weight: 600;
             }
+            QSlider::groove:horizontal { background: #334155; height: 5px; border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #2563eb; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #dce5ef; width: 12px; margin: -4px 0; border-radius: 6px; }
+            QProgressBar {
+                background: #101923;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                color: #f1f5f9;
+                text-align: center;
+            }
+            QProgressBar::chunk { background: #0f9f8c; border-radius: 3px; }
             """
         )
 
     def _build_project_header(self) -> QGroupBox:
         group = QGroupBox("Project")
         layout = QGridLayout(group)
-        layout.setColumnStretch(5, 1)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
+        layout.setColumnStretch(4, 1)
 
         self.open_video_button = QPushButton("Open Video")
         self.import_csv_button = QPushButton("Import CSV")
         self.save_csv_button = QPushButton("Save Annotation CSV")
         self.output_folder_button = QPushButton("Output Folder")
+        self.export_button = QPushButton("Batch Export")
+        self.export_button.setObjectName("primaryButton")
         self.output_folder_label = QLabel("No output folder selected")
         self.output_folder_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        self.output_folder_label.setStyleSheet("color: #a8b3c2;")
 
         self.date_edit = QLineEdit()
         self.date_edit.setPlaceholderText("YYYYMMDD")
@@ -170,7 +261,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.import_csv_button, 0, 1)
         layout.addWidget(self.save_csv_button, 0, 2)
         layout.addWidget(self.output_folder_button, 0, 3)
-        layout.addWidget(self.output_folder_label, 0, 4, 1, 2)
+        layout.addWidget(self.output_folder_label, 0, 4)
+        layout.addWidget(self.export_button, 0, 5)
 
         layout.addWidget(QLabel("Date"), 1, 0)
         layout.addWidget(self.date_edit, 1, 1)
@@ -179,21 +271,34 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("View"), 1, 4)
         layout.addWidget(self.view_combo, 1, 5)
 
-        layout.addWidget(QLabel("FFmpeg"), 2, 0)
-        layout.addWidget(self.ffmpeg_edit, 2, 1, 1, 3)
-        layout.addWidget(QLabel("Mode"), 2, 4)
-        layout.addWidget(self.mode_combo, 2, 5)
-        layout.addWidget(self.overwrite_check, 3, 0, 1, 2)
-        layout.addWidget(QLabel("Parallel exports"), 3, 2)
-        layout.addWidget(self.workers_spin, 3, 3)
+        self.advanced_export_group = QGroupBox("Export Options")
+        self.advanced_export_group.setCheckable(True)
+        self.advanced_export_group.setChecked(False)
+        advanced_layout = QVBoxLayout(self.advanced_export_group)
+        advanced_layout.setContentsMargins(6, 6, 6, 6)
+        self.advanced_export_content = QWidget()
+        options_layout = QHBoxLayout(self.advanced_export_content)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.addWidget(QLabel("FFmpeg"))
+        options_layout.addWidget(self.ffmpeg_edit, stretch=1)
+        options_layout.addWidget(QLabel("Mode"))
+        options_layout.addWidget(self.mode_combo)
+        options_layout.addWidget(self.overwrite_check)
+        options_layout.addWidget(QLabel("Parallel"))
+        options_layout.addWidget(self.workers_spin)
+        advanced_layout.addWidget(self.advanced_export_content)
+        self.advanced_export_content.setVisible(False)
+        layout.addWidget(self.advanced_export_group, 2, 0, 1, 6)
         return group
 
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("Video Review")
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(7)
 
         self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumHeight(300)
+        self.video_widget.setMinimumHeight(240)
         self.video_widget.setStyleSheet("background: #111827;")
         layout.addWidget(self.video_widget, stretch=1)
 
@@ -240,9 +345,12 @@ class MainWindow(QMainWindow):
     def _build_clip_editor(self) -> QGroupBox:
         group = QGroupBox("Clip Annotation")
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(7)
 
         self.source_label = QLabel("No video selected")
         self.source_label.setWordWrap(True)
+        self.source_label.setStyleSheet("color: #a8b3c2;")
         layout.addWidget(self.source_label)
 
         time_form = QFormLayout()
@@ -256,23 +364,18 @@ class MainWindow(QMainWindow):
         time_form.addRow("Sequence", self.sequence_spin)
         layout.addLayout(time_form)
 
-        layout.addWidget(QLabel("Behaviors"))
         self.behavior_checks: dict[str, QCheckBox] = {}
-        behaviors_widget = QWidget()
-        behaviors_layout = QVBoxLayout(behaviors_widget)
-        behaviors_layout.setContentsMargins(2, 2, 2, 2)
-        behaviors_layout.setSpacing(2)
-        for behavior in BEHAVIOR_LABELS:
+        behaviors_group = QGroupBox("Behaviors")
+        behaviors_layout = QGridLayout(behaviors_group)
+        behaviors_layout.setContentsMargins(6, 6, 6, 6)
+        behaviors_layout.setHorizontalSpacing(10)
+        behaviors_layout.setVerticalSpacing(4)
+        for index, behavior in enumerate(BEHAVIOR_LABELS):
             checkbox = QCheckBox(behavior)
             self.behavior_checks[behavior] = checkbox
-            behaviors_layout.addWidget(checkbox)
-        behaviors_layout.addStretch(1)
-
-        behavior_scroll = QScrollArea()
-        behavior_scroll.setWidgetResizable(True)
-        behavior_scroll.setWidget(behaviors_widget)
-        behavior_scroll.setMinimumHeight(155)
-        layout.addWidget(behavior_scroll)
+            row, column = divmod(index, 2)
+            behaviors_layout.addWidget(checkbox, row, column)
+        layout.addWidget(behaviors_group)
 
         labels_form = QFormLayout()
         self.polarity_combo = QComboBox()
@@ -286,12 +389,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Generated filename"))
         self.filename_preview = QLineEdit()
         self.filename_preview.setReadOnly(True)
+        self.filename_preview.setToolTip("Generated output filename")
         layout.addWidget(self.filename_preview)
 
         actions = QHBoxLayout()
         self.add_button = QPushButton("Add Clip")
         self.remove_button = QPushButton("Remove Selected")
         self.clear_button = QPushButton("Clear Editor")
+        self.add_button.setObjectName("addClipButton")
+        self.remove_button.setObjectName("dangerButton")
         actions.addWidget(self.add_button)
         actions.addWidget(self.remove_button)
         actions.addWidget(self.clear_button)
@@ -315,7 +421,7 @@ class MainWindow(QMainWindow):
             | QAbstractItemView.EditTrigger.EditKeyPressed
         )
         self.task_table.verticalHeader().setVisible(False)
-        self.task_table.verticalHeader().setDefaultSectionSize(28)
+        self.task_table.verticalHeader().setDefaultSectionSize(26)
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
@@ -326,14 +432,12 @@ class MainWindow(QMainWindow):
 
     def _build_export_status(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        self.export_button = QPushButton("Batch Export")
         self.cancel_export_button = QPushButton("Cancel Export")
         self.cancel_export_button.setEnabled(False)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.status_label = QLabel("Ready")
 
-        layout.addWidget(self.export_button)
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.progress_bar, stretch=1)
         layout.addWidget(self.status_label)
@@ -367,6 +471,9 @@ class MainWindow(QMainWindow):
         self.player.durationChanged.connect(self._update_duration)
         self.player.playbackStateChanged.connect(self._update_play_button)
         self.player.errorOccurred.connect(self._media_error)
+        self.advanced_export_group.toggled.connect(
+            self.advanced_export_content.setVisible
+        )
 
         self.date_edit.textChanged.connect(self._update_filename_preview)
         self.camera_edit.textChanged.connect(self._update_filename_preview)
@@ -644,13 +751,13 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _apply_status_color(item: QTableWidgetItem, status: str) -> None:
         colors = {
-            "ok": "#0f766e",
-            "skip": "#a16207",
-            "fail": "#b91c1c",
-            "canceled": "#475569",
-            "queued": "#334155",
+            "ok": "#2dd4bf",
+            "skip": "#fbbf24",
+            "fail": "#fb7185",
+            "canceled": "#94a3b8",
+            "queued": "#cbd5e1",
         }
-        item.setForeground(QColor(colors.get(status, "#334155")))
+        item.setForeground(QColor(colors.get(status, "#cbd5e1")))
 
     def _load_selected_clip(self) -> None:
         selected = self.task_table.selectionModel().selectedRows()
