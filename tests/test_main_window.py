@@ -6,6 +6,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -109,6 +110,35 @@ def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
     assert window.behavior_checks[BEHAVIOR_LABELS[0]].text() == "strangers_climbs"
     assert window.polarity_combo.itemText(0) == "pos"
     assert window.lighting_combo.itemText(0) == "daytime"
+
+
+def test_main_window_shortcut_mapping(qt_app):
+    window = MainWindow()
+
+    expected = {
+        "play_pause": "Space",
+        "set_start": "I",
+        "set_end": "O",
+        "add_clip": "Return",
+        "delete_selected": "Del",
+        "save_csv": "Ctrl+S",
+        "start_export": "Ctrl+E",
+        "seek_back_5": "Left",
+        "seek_forward_5": "Right",
+        "seek_back_30": "Shift+Left",
+        "seek_forward_30": "Shift+Right",
+    }
+
+    assert set(window.shortcuts) == set(expected)
+    assert all(
+        window.shortcuts[name].key() == QKeySequence(sequence)
+        for name, sequence in expected.items()
+    )
+    assert window.shortcut_help_button.text() == "快捷键说明"
+    assert "空格" in window.shortcut_hint_label.text()
+
+    dialog = window._create_shortcut_help_dialog()
+    assert dialog.windowTitle() == "快捷键说明"
 
 
 def test_editable_metadata_combos_include_custom_action(qt_app):

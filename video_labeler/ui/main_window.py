@@ -2,7 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QUrl
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -75,6 +77,17 @@ STATUS_LABELS = {
     "fail": "失败",
     "canceled": "已取消",
 }
+SHORTCUT_HELP_ROWS = (
+    ("Space", "播放或暂停"),
+    ("I", "设置起始点"),
+    ("O", "设置结束点"),
+    ("Enter", "添加或更新片段"),
+    ("Delete", "删除选中片段"),
+    ("Ctrl+S", "保存标注 CSV"),
+    ("Ctrl+E", "批量导出"),
+    ("Left / Right", "后退或前进 5 秒"),
+    ("Shift+Left / Shift+Right", "后退或前进 30 秒"),
+)
 
 
 class CollapsibleGroupBox(QGroupBox):
@@ -265,6 +278,7 @@ class MainWindow(QMainWindow):
         self.output_folder_button = QPushButton("选择输出文件夹")
         self.export_button = QPushButton("批量导出")
         self.export_button.setObjectName("primaryButton")
+        self.shortcut_help_button = QPushButton("快捷键说明")
         self.output_folder_label = QLabel("未选择输出文件夹")
         self.output_folder_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -300,6 +314,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.output_folder_button, 0, 3)
         layout.addWidget(self.output_folder_label, 0, 4)
         layout.addWidget(self.export_button, 0, 5)
+        layout.addWidget(self.shortcut_help_button, 0, 6)
 
         layout.addWidget(QLabel("日期"), 1, 0)
         layout.addWidget(self.date_edit, 1, 1)
@@ -507,10 +522,15 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.status_label = QLabel("就绪")
+        self.shortcut_hint_label = QLabel(
+            "快捷键：空格 播放/暂停，I/O 设置起止点，Enter 添加，Delete 删除，"
+            "Ctrl+S 保存，Ctrl+E 导出"
+        )
 
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.progress_bar, stretch=1)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.shortcut_hint_label)
         return layout
 
     def _new_time_spin(self) -> QDoubleSpinBox:
@@ -642,6 +662,58 @@ class MainWindow(QMainWindow):
 
         self.export_button.clicked.connect(self.start_export)
         self.cancel_export_button.clicked.connect(self.cancel_export)
+        self.shortcut_help_button.clicked.connect(self.show_shortcut_help)
+        self._register_shortcuts()
+
+    def _register_shortcuts(self) -> None:
+        bindings = {
+            "play_pause": ("Space", self.toggle_playback),
+            "set_start": (
+                "I",
+                lambda: self.start_spin.setValue(self.player.position() / 1000),
+            ),
+            "set_end": (
+                "O",
+                lambda: self.end_spin.setValue(self.player.position() / 1000),
+            ),
+            "add_clip": ("Return", self.add_or_update_clip),
+            "delete_selected": ("Del", self.remove_selected_clip),
+            "save_csv": ("Ctrl+S", self.save_csv),
+            "start_export": ("Ctrl+E", self.start_export),
+            "seek_back_5": ("Left", lambda: self._seek_relative(-5000)),
+            "seek_forward_5": ("Right", lambda: self._seek_relative(5000)),
+            "seek_back_30": ("Shift+Left", lambda: self._seek_relative(-30000)),
+            "seek_forward_30": ("Shift+Right", lambda: self._seek_relative(30000)),
+        }
+        self.shortcuts = {}
+        for name, (sequence, callback) in bindings.items():
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(callback)
+            self.shortcuts[name] = shortcut
+
+    def _create_shortcut_help_dialog(self) -> QDialog:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("快捷键说明")
+        layout = QVBoxLayout(dialog)
+        table = QTableWidget(len(SHORTCUT_HELP_ROWS), 2, dialog)
+        table.setHorizontalHeaderLabels(("快捷键", "操作"))
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        for row, (shortcut, action) in enumerate(SHORTCUT_HELP_ROWS):
+            table.setItem(row, 0, QTableWidgetItem(shortcut))
+            table.setItem(row, 1, QTableWidgetItem(action))
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        return dialog
+
+    def show_shortcut_help(self) -> None:
+        self._create_shortcut_help_dialog().exec()
 
     def set_source_path(self, path: Path) -> None:
         self.source_path = path
