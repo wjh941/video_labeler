@@ -797,7 +797,7 @@ class MainWindow(QMainWindow):
         try:
             validate_output_filename(output)
         except ValueError as error:
-            self._show_error("文件名无效", str(error))
+            self._show_error("文件名无效", f"输出文件名无效：{output}；{error}")
             self._refresh_table()
             return
         try:

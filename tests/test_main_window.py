@@ -104,6 +104,40 @@ def test_duplicate_filename_error_uses_chinese_context_and_keeps_filename(
     assert messages == [("文件名重复", "输出文件名重复：first.mp4")]
 
 
+def test_invalid_filename_error_uses_chinese_context_and_keeps_diagnostic(
+    qt_app, monkeypatch
+):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="valid.mp4",
+            sequence=1,
+        )
+    ]
+    window._refresh_table()
+    with QSignalBlocker(window.task_table):
+        window.task_table.item(0, 7).setText("bad/name.mp4")
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda _parent, title, text: messages.append((title, text))),
+    )
+
+    window._table_cell_changed(0, 7)
+
+    assert messages == [
+        (
+            "文件名无效",
+            "输出文件名无效：bad/name.mp4；"
+            "output filename contains invalid Windows characters",
+        )
+    ]
+
+
 def test_adding_clips_generates_sequential_task_filenames(qt_app, tmp_path):
     assert MainWindow is not None, "annotation main window is not implemented"
     window = MainWindow()
