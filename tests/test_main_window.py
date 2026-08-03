@@ -5,9 +5,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QSignalBlocker, Qt
+from PySide6.QtCore import QItemSelectionModel, QPoint, QSignalBlocker, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QGroupBox,
@@ -110,6 +111,100 @@ def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
     assert window.behavior_checks[BEHAVIOR_LABELS[0]].text() == "strangers_climbs"
     assert window.polarity_combo.itemText(0) == "pos"
     assert window.lighting_combo.itemText(0) == "daytime"
+
+
+def test_table_batch_operation_chinese_text(qt_app):
+    window = MainWindow()
+
+    assert window.task_table.selectionMode() == (
+        QAbstractItemView.SelectionMode.ExtendedSelection
+    )
+    assert window.batch_edit_button.text() == "批量修改选中片段"
+    assert window.batch_delete_button.text() == "批量删除选中"
+    assert window.clear_filters_button.text() == "清空筛选"
+    assert window.behavior_filter_combo.itemText(0) == "全部行为"
+    assert window.polarity_filter_combo.itemText(0) == "全部正负例"
+    assert window.status_filter_combo.itemText(0) == "全部导出状态"
+
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=0,
+            end_seconds=2,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=2,
+            end_seconds=8,
+            output=(
+                "20260729-cam02_panorama-fall-neg-night_full_color-002.mp4"
+            ),
+            behaviors=("fall",),
+            polarity="neg",
+            lighting="night_full_color",
+            sequence=2,
+            status="fail",
+        ),
+    ]
+    window._refresh_table()
+
+    window.behavior_filter_combo.setCurrentData("fall")
+    assert window.task_table.isRowHidden(0)
+    assert not window.task_table.isRowHidden(1)
+
+    window.clear_filters_button.click()
+    assert not window.task_table.isRowHidden(0)
+    assert not window.task_table.isRowHidden(1)
+
+    window._apply_batch_changes(
+        [0],
+        behaviors=("fall",),
+        polarity="neg",
+        lighting=None,
+        view=None,
+    )
+    assert window.records[0].behaviors == ("fall",)
+    assert window.records[0].polarity == "neg"
+
+    window.sort_combo.setCurrentIndex(3)
+    assert [record.sequence for record in window.records] == [2, 1]
+
+
+def test_batch_delete_selected_rows_after_confirmation(qt_app, monkeypatch):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=index,
+            end_seconds=index + 1,
+            output=f"clip-{index}.mp4",
+            sequence=index,
+        )
+        for index in range(1, 4)
+    ]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+    window.task_table.selectionModel().select(
+        window.task_table.model().index(2, 0),
+        QItemSelectionModel.SelectionFlag.Select
+        | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(
+            lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes
+        ),
+    )
+
+    window._delete_selected_records()
+
+    assert [record.sequence for record in window.records] == [2]
 
 
 def test_main_window_shortcut_mapping(qt_app):

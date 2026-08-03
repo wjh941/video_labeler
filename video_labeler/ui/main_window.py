@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QUrl
@@ -499,7 +500,7 @@ class MainWindow(QMainWindow):
             QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.task_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self.task_table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
@@ -512,6 +513,44 @@ class MainWindow(QMainWindow):
         header.setStretchLastSection(True)
         for column, width in enumerate((72, 98, 98, 82, 210, 72, 150, 430, 80, 260)):
             self.task_table.setColumnWidth(column, width)
+
+        toolbar = QHBoxLayout()
+        self.batch_edit_button = QPushButton("批量修改选中片段")
+        self.batch_delete_button = QPushButton("批量删除选中")
+        self.batch_delete_button.setObjectName("dangerButton")
+        self.behavior_filter_combo = QComboBox()
+        self.behavior_filter_combo.addItem("全部行为", None)
+        for behavior in BEHAVIOR_LABELS:
+            self.behavior_filter_combo.addItem(behavior, behavior)
+        self.behavior_filter_combo.setCurrentData = lambda value: (
+            self.behavior_filter_combo.setCurrentIndex(
+                self.behavior_filter_combo.findData(value)
+            )
+        )
+        self.polarity_filter_combo = QComboBox()
+        self.polarity_filter_combo.addItem("全部正负例", None)
+        for polarity in POLARITIES:
+            self.polarity_filter_combo.addItem(polarity, polarity)
+        self.status_filter_combo = QComboBox()
+        self.status_filter_combo.addItem("全部导出状态", None)
+        for status, label in STATUS_LABELS.items():
+            self.status_filter_combo.addItem(label, status)
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("编号升序", ("sequence", False))
+        self.sort_combo.addItem("编号降序", ("sequence", True))
+        self.sort_combo.addItem("时长升序", ("duration", False))
+        self.sort_combo.addItem("时长降序", ("duration", True))
+        self.clear_filters_button = QPushButton("清空筛选")
+
+        toolbar.addWidget(self.batch_edit_button)
+        toolbar.addWidget(self.batch_delete_button)
+        toolbar.addWidget(self.behavior_filter_combo)
+        toolbar.addWidget(self.polarity_filter_combo)
+        toolbar.addWidget(self.status_filter_combo)
+        toolbar.addWidget(self.sort_combo)
+        toolbar.addWidget(self.clear_filters_button)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
         layout.addWidget(self.task_table)
         return group
 
@@ -657,6 +696,19 @@ class MainWindow(QMainWindow):
         self.add_button.clicked.connect(self.add_or_update_clip)
         self.remove_button.clicked.connect(self.remove_selected_clip)
         self.clear_button.clicked.connect(self.clear_editor)
+        self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
+        self.batch_delete_button.clicked.connect(self._delete_selected_records)
+        self.behavior_filter_combo.currentIndexChanged.connect(
+            self._apply_table_filters
+        )
+        self.polarity_filter_combo.currentIndexChanged.connect(
+            self._apply_table_filters
+        )
+        self.status_filter_combo.currentIndexChanged.connect(
+            self._apply_table_filters
+        )
+        self.sort_combo.currentIndexChanged.connect(self._sort_records)
+        self.clear_filters_button.clicked.connect(self.clear_table_filters)
         self.task_table.itemSelectionChanged.connect(self._load_selected_clip)
         self.task_table.cellChanged.connect(self._table_cell_changed)
 
@@ -878,15 +930,7 @@ class MainWindow(QMainWindow):
         self._refresh_table()
 
     def remove_selected_clip(self) -> None:
-        selected = self.task_table.selectionModel().selectedRows()
-        if not selected:
-            return
-        row = selected[0].row()
-        del self.records[row]
-        self._editing_index = None
-        self.add_button.setText("添加片段")
-        self._refresh_table()
-        self._set_status("已删除所选片段")
+        self._delete_selected_records()
 
     def clear_editor(self) -> None:
         self._editing_index = None
@@ -988,6 +1032,69 @@ class MainWindow(QMainWindow):
                     if column == 8:
                         self._apply_status_color(item, record.status)
                     self.task_table.setItem(row, column, item)
+        self._sync_filter_options()
+        self._apply_table_filters()
+
+    def _sync_filter_options(self) -> None:
+        filter_options = (
+            (
+                self.polarity_filter_combo,
+                (record.polarity for record in self.records),
+                lambda value: value,
+            ),
+            (
+                self.status_filter_combo,
+                (record.status for record in self.records),
+                lambda value: STATUS_LABELS.get(value, value),
+            ),
+        )
+        for combo, values, label_for in filter_options:
+            current_data = combo.currentData()
+            with QSignalBlocker(combo):
+                for value in values:
+                    if value and combo.findData(value) < 0:
+                        combo.addItem(label_for(value), value)
+                current_index = combo.findData(current_data)
+                if current_index >= 0:
+                    combo.setCurrentIndex(current_index)
+
+        for combo in (
+            self.behavior_filter_combo,
+            self.polarity_filter_combo,
+            self.status_filter_combo,
+            self.sort_combo,
+        ):
+            self._set_combo_visible_item_count(combo)
+
+    def _apply_table_filters(self) -> None:
+        behavior = self.behavior_filter_combo.currentData()
+        polarity = self.polarity_filter_combo.currentData()
+        status = self.status_filter_combo.currentData()
+        for row, record in enumerate(self.records):
+            visible = (
+                (behavior is None or behavior in record.behaviors)
+                and (polarity is None or polarity == record.polarity)
+                and (status is None or status == record.status)
+            )
+            self.task_table.setRowHidden(row, not visible)
+
+    def clear_table_filters(self) -> None:
+        self.behavior_filter_combo.setCurrentIndex(0)
+        self.polarity_filter_combo.setCurrentIndex(0)
+        self.status_filter_combo.setCurrentIndex(0)
+        self._apply_table_filters()
+
+    def _sort_records(self) -> None:
+        key_name, reverse = self.sort_combo.currentData()
+        if key_name == "duration":
+            self.records.sort(
+                key=lambda record: record.end_seconds - record.start_seconds,
+                reverse=reverse,
+            )
+        else:
+            self.records.sort(key=lambda record: record.sequence, reverse=reverse)
+        self._editing_index = None
+        self._refresh_table()
 
     @staticmethod
     def _apply_status_color(item: QTableWidgetItem, status: str) -> None:
@@ -1002,7 +1109,9 @@ class MainWindow(QMainWindow):
 
     def _load_selected_clip(self) -> None:
         selected = self.task_table.selectionModel().selectedRows()
-        if not selected:
+        if len(selected) != 1:
+            self._editing_index = None
+            self.add_button.setText("添加片段")
             return
         index = selected[0].row()
         record = self.records[index]
@@ -1030,6 +1139,172 @@ class MainWindow(QMainWindow):
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()
+
+    def _selected_record_indexes(self) -> list[int]:
+        return sorted(
+            {index.row() for index in self.task_table.selectionModel().selectedRows()}
+        )
+
+    def _apply_batch_changes(
+        self,
+        indexes: list[int],
+        behaviors: tuple[str, ...] | None,
+        polarity: str | None,
+        lighting: str | None,
+        view: str | None,
+    ) -> None:
+        selected_indexes = set(indexes)
+        proposed: dict[int, ClipRecord] = {}
+        skipped_manual_view = False
+
+        for index in indexes:
+            record = self.records[index]
+            next_behaviors = behaviors if behaviors is not None else record.behaviors
+            next_polarity = polarity if polarity is not None else record.polarity
+            next_lighting = lighting if lighting is not None else record.lighting
+            parsed = parse_filename(record.output)
+            output = record.output
+
+            if parsed is not None:
+                metadata = ProjectMetadata(
+                    date=parsed.metadata.date,
+                    camera=parsed.metadata.camera,
+                    view=view if view is not None else parsed.metadata.view,
+                )
+                output = build_filename(
+                    metadata,
+                    next_behaviors,
+                    next_polarity,
+                    next_lighting,
+                    parsed.sequence,
+                )
+            elif view is not None:
+                skipped_manual_view = True
+
+            proposed[index] = replace(
+                record,
+                output=output,
+                behaviors=next_behaviors,
+                polarity=next_polarity,
+                lighting=next_lighting,
+            )
+
+        existing_outputs = {
+            record.output.lower()
+            for index, record in enumerate(self.records)
+            if index not in selected_indexes
+        }
+        proposed_outputs: set[str] = set()
+        for record in proposed.values():
+            output = record.output.lower()
+            if output in existing_outputs or output in proposed_outputs:
+                raise ValueError(f"批量修改后输出文件名重复：{record.output}")
+            proposed_outputs.add(output)
+
+        for index, record in proposed.items():
+            self.records[index] = record
+        self._editing_index = None
+        self._refresh_table()
+        if skipped_manual_view:
+            self._set_status("批量修改完成；手动命名片段未更新视角")
+        else:
+            self._set_status(f"已批量修改 {len(indexes)} 个片段")
+
+    def show_batch_edit_dialog(self) -> None:
+        indexes = self._selected_record_indexes()
+        if not indexes:
+            self._show_error("未选择片段", "请先选择至少一个片段。")
+            return
+
+        def _copy_data_combo(source_combo: QComboBox) -> QComboBox:
+            combo = QComboBox()
+            for index in range(source_combo.count()):
+                if source_combo.itemText(index) != CUSTOM_OPTION_TEXT:
+                    combo.addItem(
+                        source_combo.itemText(index), source_combo.itemData(index)
+                    )
+            self._set_combo_visible_item_count(combo)
+            return combo
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("批量修改选中片段")
+        layout = QVBoxLayout(dialog)
+        apply_behaviors = QCheckBox("应用此字段：行为标签")
+        batch_behavior_checks = {
+            behavior: QCheckBox(behavior) for behavior in BEHAVIOR_LABELS
+        }
+        apply_polarity = QCheckBox("应用此字段：正负例")
+        polarity_combo = _copy_data_combo(self.polarity_combo)
+        apply_lighting = QCheckBox("应用此字段：光照")
+        lighting_combo = _copy_data_combo(self.lighting_combo)
+        apply_view = QCheckBox("应用此字段：视角")
+        view_combo = _copy_data_combo(self.view_combo)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+
+        layout.addWidget(apply_behaviors)
+        for checkbox in batch_behavior_checks.values():
+            layout.addWidget(checkbox)
+        layout.addWidget(apply_polarity)
+        layout.addWidget(polarity_combo)
+        layout.addWidget(apply_lighting)
+        layout.addWidget(lighting_combo)
+        layout.addWidget(apply_view)
+        layout.addWidget(view_combo)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        behaviors = (
+            tuple(
+                behavior
+                for behavior, checkbox in batch_behavior_checks.items()
+                if checkbox.isChecked()
+            )
+            if apply_behaviors.isChecked()
+            else None
+        )
+        if behaviors == ():
+            self._show_error("批量修改失败", "应用行为标签时至少选择一个行为。")
+            return
+
+        polarity = (
+            polarity_combo.currentText() if apply_polarity.isChecked() else None
+        )
+        lighting = (
+            lighting_combo.currentText() if apply_lighting.isChecked() else None
+        )
+        view = view_combo.currentText() if apply_view.isChecked() else None
+        try:
+            self._apply_batch_changes(indexes, behaviors, polarity, lighting, view)
+        except ValueError as error:
+            self._show_error("批量修改失败", str(error))
+
+    def _delete_selected_records(self) -> None:
+        indexes = self._selected_record_indexes()
+        if not indexes:
+            self._show_error("未选择片段", "请先选择至少一个片段。")
+            return
+        answer = QMessageBox.question(
+            self,
+            "确认批量删除",
+            f"确定删除选中的 {len(indexes)} 个片段吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        for index in reversed(indexes):
+            del self.records[index]
+        self._editing_index = None
+        self.add_button.setText("添加片段")
+        self._refresh_table()
+        self._set_status(f"已删除 {len(indexes)} 个片段")
 
     def _table_cell_changed(self, row: int, column: int) -> None:
         if column != 7 or row >= len(self.records):
