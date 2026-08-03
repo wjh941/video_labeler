@@ -77,6 +77,23 @@ STATUS_LABELS = {
 }
 
 
+class CollapsibleGroupBox(QGroupBox):
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(title, parent)
+        self.setCheckable(True)
+        self.setChecked(True)
+        self._content: QWidget | None = None
+        self.toggled.connect(self._set_content_visible)
+
+    def set_content(self, content: QWidget) -> None:
+        self._content = content
+        content.setVisible(self.isChecked())
+
+    def _set_content_visible(self, expanded: bool) -> None:
+        if self._content is not None:
+            self._content.setVisible(expanded)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -396,16 +413,23 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.behavior_checks: dict[str, QCheckBox] = {}
-        self.behaviors_group = QGroupBox("行为标签")
-        behaviors_layout = QGridLayout(self.behaviors_group)
+        self.behaviors_group = CollapsibleGroupBox("行为标签")
+        self.behavior_checks_container = QWidget()
+        self.behavior_checks_layout = QGridLayout(self.behavior_checks_container)
+        self.behavior_checks_layout.setContentsMargins(0, 0, 0, 0)
+        self.behavior_checks_layout.setHorizontalSpacing(10)
+        self.behavior_checks_layout.setVerticalSpacing(4)
+        self.behavior_columns = 2
+
+        behaviors_layout = QVBoxLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
-        behaviors_layout.setHorizontalSpacing(10)
-        behaviors_layout.setVerticalSpacing(4)
-        for index, behavior in enumerate(BEHAVIOR_LABELS):
+        behaviors_layout.addWidget(self.behavior_checks_container)
+        self.behaviors_group.set_content(self.behavior_checks_container)
+
+        for behavior in BEHAVIOR_LABELS:
             checkbox = QCheckBox(behavior)
             self.behavior_checks[behavior] = checkbox
-            row, column = divmod(index, 2)
-            behaviors_layout.addWidget(checkbox, row, column)
+        self._reflow_behavior_checks()
         layout.addWidget(self.behaviors_group)
 
         labels_form = QFormLayout()
@@ -435,6 +459,20 @@ class MainWindow(QMainWindow):
         self.filename_preview.setToolTip("生成的输出文件名")
         layout.addWidget(self.filename_preview)
         return group
+
+    def _reflow_behavior_checks(self) -> None:
+        columns = 3 if self.width() >= 1280 else 2
+        self.behavior_columns = columns
+        while self.behavior_checks_layout.count():
+            self.behavior_checks_layout.takeAt(0)
+        for index, checkbox in enumerate(self.behavior_checks.values()):
+            row, column = divmod(index, columns)
+            self.behavior_checks_layout.addWidget(checkbox, row, column)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "behavior_checks_layout"):
+            self._reflow_behavior_checks()
 
     def _build_task_table(self) -> QGroupBox:
         group = QGroupBox("片段任务")
@@ -491,6 +529,7 @@ class MainWindow(QMainWindow):
         guidance: str,
     ) -> None:
         combo.addItem(CUSTOM_OPTION_TEXT)
+        self._set_combo_visible_item_count(combo)
         combo.setProperty("last_valid_index", combo.currentIndex())
         combo.currentIndexChanged.connect(
             lambda index: self._request_custom_combo_value(
@@ -538,6 +577,10 @@ class MainWindow(QMainWindow):
             combo.insertItem(index, normalized)
         combo.setCurrentIndex(index)
         combo.setProperty("last_valid_index", index)
+        self._set_combo_visible_item_count(combo)
+
+    def _set_combo_visible_item_count(self, combo: QComboBox) -> None:
+        combo.setMaxVisibleItems(max(1, combo.count()))
 
     def _restore_parsed_metadata(self, parsed: ParsedFilename) -> None:
         self.date_edit.setText(parsed.metadata.date)

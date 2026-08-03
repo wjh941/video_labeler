@@ -9,6 +9,7 @@ from PySide6.QtCore import QPoint, QSignalBlocker, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QGroupBox,
     QInputDialog,
     QMessageBox,
     QScrollArea,
@@ -32,6 +33,66 @@ except ImportError:
 @pytest.fixture(scope="module")
 def qt_app():
     return QApplication.instance() or QApplication([])
+
+
+def test_add_clip_keep_label_selected(qt_app, tmp_path):
+    window = MainWindow()
+    source_path = tmp_path / "source.mp4"
+    window.set_source_path(source_path)
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.behavior_checks["dog_out"].setChecked(True)
+    window.behavior_checks["fall"].setChecked(True)
+    window.polarity_combo.setCurrentText("neg")
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.set_clip_range(1.0, 2.0)
+
+    window.add_or_update_clip()
+
+    assert window.sequence_spin.value() == 2
+    assert window.behavior_checks["dog_out"].isChecked()
+    assert window.behavior_checks["fall"].isChecked()
+    assert window.view_combo.currentText() == "indoor"
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+
+
+def test_collapsible_behavior_group(qt_app):
+    window = MainWindow()
+    window.show()
+    qt_app.processEvents()
+
+    assert isinstance(window.behaviors_group, QGroupBox)
+    assert window.behaviors_group.isCheckable()
+    assert window.behaviors_group.isChecked()
+    assert window.behavior_checks_container.isVisible()
+
+    window.behaviors_group.setChecked(False)
+    qt_app.processEvents()
+    assert not window.behavior_checks_container.isVisible()
+
+    window.behaviors_group.setChecked(True)
+    qt_app.processEvents()
+    assert window.behavior_checks_container.isVisible()
+
+
+def test_tag_area_no_scrollbar(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert not window.behaviors_group.findChildren(QScrollArea)
+    assert window.behavior_columns == 3
+
+    window.resize(1120, 720)
+    qt_app.processEvents()
+    assert window.behavior_columns == 2
+
+    assert window.view_combo.maxVisibleItems() == window.view_combo.count()
+    assert window.polarity_combo.maxVisibleItems() == window.polarity_combo.count()
+    assert window.lighting_combo.maxVisibleItems() == window.lighting_combo.count()
 
 
 def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
