@@ -1,0 +1,1 @@
+"""Video segment labeling application."""
