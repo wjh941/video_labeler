@@ -42,7 +42,12 @@ from ..models import (
     ClipRecord,
     ProjectMetadata,
 )
-from ..naming import build_filename, next_sequence, parse_filename
+from ..naming import (
+    build_filename,
+    next_sequence,
+    parse_filename,
+    validate_output_filename,
+)
 
 
 TABLE_COLUMNS = (
@@ -674,8 +679,10 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         output = item.text().strip()
-        if not output.lower().endswith(".mp4"):
-            self._show_error("Invalid filename", "Output filename must end with .mp4")
+        try:
+            validate_output_filename(output)
+        except ValueError as error:
+            self._show_error("Invalid filename", str(error))
             self._refresh_table()
             return
         try:
@@ -712,6 +719,8 @@ class MainWindow(QMainWindow):
             outputs = [record.output.lower() for record in self.records]
             if len(outputs) != len(set(outputs)):
                 raise ValueError("The task list contains duplicate output filenames.")
+            for record in self.records:
+                validate_output_filename(record.output)
         except (OSError, RuntimeError, ValueError) as error:
             self._show_error("Cannot start export", str(error))
             return

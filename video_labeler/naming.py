@@ -12,6 +12,15 @@ from .models import (
 
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 _DATE_PATTERN = re.compile(r"^\d{8}$")
+_INVALID_WINDOWS_FILENAME_CHARACTERS = set('<>:"/\\|?*')
+_RESERVED_WINDOWS_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,24 @@ def build_filename(
         f"{metadata.date}-{metadata.camera}_{metadata.view}-{behavior_text}-"
         f"{polarity}-{lighting}-{sequence:03d}.mp4"
     )
+
+
+def validate_output_filename(filename: str) -> None:
+    if not filename or filename != filename.strip():
+        raise ValueError("output filename cannot be empty or padded with spaces")
+    if not filename.lower().endswith(".mp4"):
+        raise ValueError("output filename must end with .mp4")
+    if filename.endswith((".", " ")):
+        raise ValueError("output filename cannot end with a dot or space")
+    if any(
+        character in _INVALID_WINDOWS_FILENAME_CHARACTERS or ord(character) < 32
+        for character in filename
+    ):
+        raise ValueError("output filename contains invalid Windows characters")
+
+    stem = filename[:-4].upper()
+    if stem in _RESERVED_WINDOWS_NAMES:
+        raise ValueError("output filename uses a reserved Windows device name")
 
 
 def parse_filename(filename: str) -> ParsedFilename | None:

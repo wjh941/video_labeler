@@ -9,6 +9,11 @@ except ImportError:
     next_sequence = None
     parse_filename = None
 
+try:
+    from video_labeler.naming import validate_output_filename
+except ImportError:
+    validate_output_filename = None
+
 
 def _require_naming_api():
     assert ProjectMetadata is not None, "video labeling domain API is not implemented"
@@ -58,3 +63,10 @@ def test_build_filename_rejects_an_invalid_camera_token():
 
     with pytest.raises(ValueError, match="camera"):
         build_filename(metadata, ("dog_out",), "pos", "daytime", 1)
+
+
+def test_validate_output_filename_rejects_windows_path_characters():
+    assert validate_output_filename is not None, "filename validation is not implemented"
+
+    with pytest.raises(ValueError, match="invalid Windows"):
+        validate_output_filename("20260729-cam02_panorama-dog/out.mp4")
