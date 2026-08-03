@@ -6,7 +6,14 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt
-from PySide6.QtWidgets import QApplication, QMessageBox, QScrollArea, QSlider, QSplitter
+from PySide6.QtWidgets import (
+    QApplication,
+    QInputDialog,
+    QMessageBox,
+    QScrollArea,
+    QSlider,
+    QSplitter,
+)
 
 from video_labeler.models import (
     BEHAVIOR_LABELS,
@@ -40,6 +47,103 @@ def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
     assert window.behavior_checks[BEHAVIOR_LABELS[0]].text() == "strangers_climbs"
     assert window.polarity_combo.itemText(0) == "pos"
     assert window.lighting_combo.itemText(0) == "daytime"
+
+
+def test_editable_metadata_combos_include_custom_action(qt_app):
+    window = MainWindow()
+
+    assert window.view_combo.itemText(window.view_combo.count() - 1) == "自定义..."
+    assert window.polarity_combo.itemText(window.polarity_combo.count() - 1) == "自定义..."
+    assert window.lighting_combo.itemText(window.lighting_combo.count() - 1) == "自定义..."
+    assert [window.mode_combo.itemText(index) for index in range(window.mode_combo.count())] == [
+        "encode",
+        "copy",
+    ]
+    assert [window.speed_combo.itemText(index) for index in range(window.speed_combo.count())] == [
+        "0.5x",
+        "1.0x",
+        "1.5x",
+        "2.0x",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("combo_name", "entered", "expected"),
+    (
+        ("view_combo", " DoorWay ", "doorway"),
+        ("polarity_combo", " Needs_Review ", "needs_review"),
+        ("lighting_combo", " Night_Red ", "night_red"),
+    ),
+)
+def test_custom_metadata_prompt_normalizes_adds_and_selects_value(
+    qt_app, monkeypatch, combo_name, entered, expected
+):
+    window = MainWindow()
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        staticmethod(lambda *_args, **_kwargs: (entered, True)),
+    )
+    combo = getattr(window, combo_name)
+
+    combo.setCurrentIndex(combo.count() - 1)
+
+    assert combo.currentText() == expected
+    assert combo.itemText(combo.count() - 2) == expected
+    assert combo.itemText(combo.count() - 1) == "自定义..."
+
+
+def test_custom_metadata_prompt_selects_an_existing_value_without_duplicate(
+    qt_app, monkeypatch
+):
+    window = MainWindow()
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        staticmethod(lambda *_args, **_kwargs: (" PANORAMA ", True)),
+    )
+    initial_count = window.view_combo.count()
+
+    window.view_combo.setCurrentIndex(window.view_combo.count() - 1)
+
+    assert window.view_combo.currentText() == "panorama"
+    assert window.view_combo.count() == initial_count
+
+
+def test_invalid_custom_view_restores_previous_selection(qt_app, monkeypatch):
+    window = MainWindow()
+    messages = []
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        staticmethod(lambda *_args, **_kwargs: ("indoor_room", True)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda _parent, title, text: messages.append((title, text))),
+    )
+
+    window.view_combo.setCurrentText("panorama")
+    window.view_combo.setCurrentIndex(window.view_combo.count() - 1)
+
+    assert window.view_combo.currentText() == "panorama"
+    assert messages
+    assert "仅支持小写英文和数字" in messages[0][1]
+
+
+def test_canceling_custom_value_restores_previous_selection(qt_app, monkeypatch):
+    window = MainWindow()
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        staticmethod(lambda *_args, **_kwargs: ("", False)),
+    )
+
+    window.polarity_combo.setCurrentText("neg")
+    window.polarity_combo.setCurrentIndex(window.polarity_combo.count() - 1)
+
+    assert window.polarity_combo.currentText() == "neg"
 
 
 def test_task_table_displays_chinese_status_without_changing_record_status(qt_app):

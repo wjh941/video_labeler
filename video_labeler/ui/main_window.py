@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QUrl
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -45,6 +47,8 @@ from ..models import (
 from ..naming import (
     build_filename,
     next_sequence,
+    normalize_label_token,
+    normalize_view_token,
     parse_filename,
     validate_output_filename,
 )
@@ -62,6 +66,7 @@ TABLE_COLUMNS = (
     "状态",
     "错误信息",
 )
+CUSTOM_OPTION_TEXT = "自定义..."
 STATUS_LABELS = {
     "queued": "排队中",
     "ok": "成功",
@@ -254,6 +259,12 @@ class MainWindow(QMainWindow):
         self.camera_edit.setPlaceholderText("cam02")
         self.view_combo = QComboBox()
         self.view_combo.addItems(VIEW_TYPES)
+        self._configure_custom_combo(
+            self.view_combo,
+            "视角",
+            normalize_view_token,
+            "仅支持小写英文和数字。",
+        )
 
         self.ffmpeg_edit = QLineEdit()
         self.ffmpeg_edit.setPlaceholderText("留空则使用 PATH 中的 FFmpeg")
@@ -399,8 +410,20 @@ class MainWindow(QMainWindow):
         labels_form = QFormLayout()
         self.polarity_combo = QComboBox()
         self.polarity_combo.addItems(POLARITIES)
+        self._configure_custom_combo(
+            self.polarity_combo,
+            "正负性",
+            lambda value: normalize_label_token(value, "polarity"),
+            "仅支持小写英文、数字和下划线。",
+        )
         self.lighting_combo = QComboBox()
         self.lighting_combo.addItems(LIGHTING_VALUES)
+        self._configure_custom_combo(
+            self.lighting_combo,
+            "光照",
+            lambda value: normalize_label_token(value, "lighting"),
+            "仅支持小写英文、数字和下划线。",
+        )
         labels_form.addRow("正负性", self.polarity_combo)
         labels_form.addRow("光照", self.lighting_combo)
         layout.addLayout(labels_form)
@@ -458,6 +481,62 @@ class MainWindow(QMainWindow):
         spin.setSingleStep(0.1)
         spin.setKeyboardTracking(False)
         return spin
+
+    def _configure_custom_combo(
+        self,
+        combo: QComboBox,
+        field_name: str,
+        normalize: Callable[[str], str],
+        guidance: str,
+    ) -> None:
+        combo.addItem(CUSTOM_OPTION_TEXT)
+        combo.setProperty("last_valid_index", combo.currentIndex())
+        combo.currentIndexChanged.connect(
+            lambda index: self._request_custom_combo_value(
+                combo, index, field_name, normalize, guidance
+            )
+        )
+
+    def _request_custom_combo_value(
+        self,
+        combo: QComboBox,
+        index: int,
+        field_name: str,
+        normalize: Callable[[str], str],
+        guidance: str,
+    ) -> None:
+        if combo.itemText(index) != CUSTOM_OPTION_TEXT:
+            combo.setProperty("last_valid_index", index)
+            return
+
+        previous_index = int(combo.property("last_valid_index"))
+        value, accepted = QInputDialog.getText(
+            self,
+            "添加自定义选项",
+            f"请输入自定义{field_name}：",
+        )
+        if not accepted:
+            combo.setCurrentIndex(previous_index)
+            return
+        try:
+            self._set_custom_combo_value(combo, value, normalize)
+        except ValueError:
+            combo.setCurrentIndex(previous_index)
+            self._show_error("自定义选项无效", f"{field_name}无效：{guidance}")
+
+    def _set_custom_combo_value(
+        self,
+        combo: QComboBox,
+        value: str,
+        normalize: Callable[[str], str],
+    ) -> None:
+        normalized = normalize(value)
+        index = combo.findText(normalized)
+        if index < 0:
+            index = combo.findText(CUSTOM_OPTION_TEXT)
+            combo.insertItem(index, normalized)
+        combo.setCurrentIndex(index)
+        combo.setProperty("last_valid_index", index)
 
     def _connect_signals(self) -> None:
         self.open_video_button.clicked.connect(self.open_video)
