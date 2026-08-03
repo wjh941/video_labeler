@@ -114,8 +114,10 @@ updates occur after the new record is appended.
 
 All new commands handle empty table selection without mutating the task list.
 Batch edit displays Chinese errors for no selected rows, no selected behavior
-when behavior replacement is enabled, duplicate generated filenames, and
-unsupported metadata in manually named rows. Canceling either modal leaves the
+when behavior replacement is enabled, and duplicate generated filenames. When
+a selected batch contains manually named rows and applies a view change, those
+rows retain their output name and unavailable view and the final Chinese status
+reports that the view update was skipped. Canceling either modal leaves the
 table and editor untouched.
 
 ## Verification
