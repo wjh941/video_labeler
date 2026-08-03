@@ -13,7 +13,7 @@ BEHAVIOR_LABELS = (
     "dog_out",
     "pool",
 )
-VIEW_TYPES = ("panorama", "closeup")
+VIEW_TYPES = ("panorama", "closeup", "indoor")
 POLARITIES = ("pos", "neg")
 LIGHTING_VALUES = ("daytime", "night_full_color", "night_black_white")
 

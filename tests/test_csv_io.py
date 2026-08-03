@@ -67,6 +67,26 @@ def test_read_clip_csv_restores_times_and_standard_filename_labels(tmp_path):
     assert record.sequence == 21
 
 
+def test_read_clip_csv_restores_custom_filename_labels(tmp_path):
+    _require_csv_api()
+    csv_path = tmp_path / "custom-clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "cam02.mp4,00:00:02.500,00:00:04.000,"
+            "20260729-cam_02_doorway-dog_out-needs_review-night_red-007.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+
+    record = read_clip_csv(csv_path)[0]
+
+    assert record.behaviors == ("dog_out",)
+    assert record.polarity == "needs_review"
+    assert record.lighting == "night_red"
+    assert record.sequence == 7
+
+
 def test_read_clip_csv_rejects_missing_required_headers(tmp_path):
     _require_csv_api()
     csv_path = tmp_path / "invalid.csv"

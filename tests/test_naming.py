@@ -1,7 +1,7 @@
 import pytest
 
 try:
-    from video_labeler.models import ProjectMetadata
+    from video_labeler.models import ProjectMetadata, VIEW_TYPES
     from video_labeler.naming import build_filename, next_sequence, parse_filename
 except ImportError:
     ProjectMetadata = None
@@ -55,6 +55,62 @@ def test_parse_filename_restores_standard_fields():
     assert parsed.polarity == "neg"
     assert parsed.lighting == "daytime"
     assert parsed.sequence == 21
+
+
+def test_indoor_is_a_builtin_view_option():
+    assert "indoor" in VIEW_TYPES
+
+
+def test_build_and_parse_filename_supports_custom_metadata_tokens():
+    metadata = ProjectMetadata(date="20260729", camera="cam_02", view="Doorway")
+
+    filename = build_filename(
+        metadata,
+        ("dog_out",),
+        "Needs_Review",
+        "Night_Red",
+        7,
+    )
+
+    assert filename == (
+        "20260729-cam_02_doorway-dog_out-needs_review-night_red-007.mp4"
+    )
+    parsed = parse_filename(filename)
+    assert parsed is not None
+    assert parsed.metadata.camera == "cam_02"
+    assert parsed.metadata.view == "doorway"
+    assert parsed.polarity == "needs_review"
+    assert parsed.lighting == "night_red"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "polarity", "lighting", "field"),
+    (
+        (
+            ProjectMetadata("20260729", "cam02", "indoor_room"),
+            "pos",
+            "daytime",
+            "view",
+        ),
+        (
+            ProjectMetadata("20260729", "cam02", "indoor"),
+            "needs review",
+            "daytime",
+            "polarity",
+        ),
+        (
+            ProjectMetadata("20260729", "cam02", "indoor"),
+            "pos",
+            "night-red",
+            "lighting",
+        ),
+    ),
+)
+def test_build_filename_rejects_invalid_editable_metadata_tokens(
+    metadata, polarity, lighting, field
+):
+    with pytest.raises(ValueError, match=field):
+        build_filename(metadata, ("dog_out",), polarity, lighting, 1)
 
 
 def test_build_filename_rejects_an_invalid_camera_token():
