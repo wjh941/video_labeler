@@ -23,3 +23,17 @@ class ProjectMetadata:
     date: str
     camera: str
     view: str
+
+
+@dataclass
+class ClipRecord:
+    source: str
+    start_seconds: float
+    end_seconds: float
+    output: str
+    behaviors: tuple[str, ...] = ()
+    polarity: str = ""
+    lighting: str = ""
+    sequence: int = 0
+    status: str = "queued"
+    error: str = ""
