@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QUrl
+from PySide6.QtCore import QItemSelectionModel, QSignalBlocker, Qt, QUrl
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -1070,6 +1070,7 @@ class MainWindow(QMainWindow):
         behavior = self.behavior_filter_combo.currentData()
         polarity = self.polarity_filter_combo.currentData()
         status = self.status_filter_combo.currentData()
+        selection_model = self.task_table.selectionModel()
         for row, record in enumerate(self.records):
             visible = (
                 (behavior is None or behavior in record.behaviors)
@@ -1077,6 +1078,12 @@ class MainWindow(QMainWindow):
                 and (status is None or status == record.status)
             )
             self.task_table.setRowHidden(row, not visible)
+            if not visible:
+                selection_model.select(
+                    self.task_table.model().index(row, 0),
+                    QItemSelectionModel.SelectionFlag.Deselect
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
 
     def clear_table_filters(self) -> None:
         self.behavior_filter_combo.setCurrentIndex(0)
@@ -1142,7 +1149,11 @@ class MainWindow(QMainWindow):
 
     def _selected_record_indexes(self) -> list[int]:
         return sorted(
-            {index.row() for index in self.task_table.selectionModel().selectedRows()}
+            {
+                index.row()
+                for index in self.task_table.selectionModel().selectedRows()
+                if not self.task_table.isRowHidden(index.row())
+            }
         )
 
     def _apply_batch_changes(

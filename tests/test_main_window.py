@@ -207,6 +207,142 @@ def test_batch_delete_selected_rows_after_confirmation(qt_app, monkeypatch):
     assert [record.sequence for record in window.records] == [2]
 
 
+def test_filtering_out_selected_rows_excludes_them_from_batch_operations(
+    qt_app, monkeypatch
+):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=0,
+            end_seconds=2,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=2,
+            end_seconds=4,
+            output="20260729-cam02_panorama-fall-neg-daytime-002.mp4",
+            behaviors=("fall",),
+            polarity="neg",
+            lighting="daytime",
+            sequence=2,
+        ),
+    ]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+
+    window.behavior_filter_combo.setCurrentData("fall")
+
+    assert window.task_table.isRowHidden(0)
+    assert not window.task_table.selectionModel().selectedRows()
+    assert window._selected_record_indexes() == []
+
+    errors = []
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda title, text: errors.append((title, text)),
+    )
+    window._delete_selected_records()
+
+    assert [record.sequence for record in window.records] == [1, 2]
+    assert errors == [("未选择片段", "请先选择至少一个片段。")]
+
+
+def test_batch_changes_reject_filename_collisions_without_partial_mutation(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=0,
+            end_seconds=2,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=2,
+            end_seconds=4,
+            output="20260729-cam02_panorama-fall-pos-daytime-001.mp4",
+            behaviors=("fall",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=4,
+            end_seconds=6,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-002.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=2,
+        ),
+    ]
+    original_records = list(window.records)
+
+    with pytest.raises(ValueError, match="批量修改后输出文件名重复"):
+        window._apply_batch_changes(
+            [0, 2],
+            behaviors=("fall",),
+            polarity=None,
+            lighting=None,
+            view=None,
+        )
+
+    assert window.records == original_records
+
+
+def test_batch_view_update_preserves_manual_filename_and_reports_skip_status(qt_app):
+    window = MainWindow()
+    manual_output = "manual-clip.mp4"
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=0,
+            end_seconds=2,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=2,
+            end_seconds=4,
+            output=manual_output,
+            behaviors=("fall",),
+            polarity="neg",
+            lighting="night_full_color",
+            sequence=2,
+        ),
+    ]
+
+    window._apply_batch_changes(
+        [0, 1],
+        behaviors=None,
+        polarity=None,
+        lighting=None,
+        view="indoor",
+    )
+
+    assert window.records[0].output == (
+        "20260729-cam02_indoor-dog_out-pos-daytime-001.mp4"
+    )
+    assert window.records[1].output == manual_output
+    assert window.status_label.text() == "批量修改完成；手动命名片段未更新视角"
+
+
 def test_main_window_shortcut_mapping(qt_app):
     window = MainWindow()
 
