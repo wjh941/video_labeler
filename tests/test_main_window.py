@@ -5,7 +5,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
 
 try:
@@ -69,3 +69,19 @@ def test_annotation_controls_are_wrapped_in_a_scroll_area(qt_app):
     assert isinstance(window.annotation_scroll, QScrollArea)
     assert window.annotation_scroll.widget() is window.annotation_panel
     assert window.annotation_scroll.widgetResizable()
+
+
+def test_add_clip_action_appears_before_behavior_choices(qt_app):
+    window = MainWindow()
+    window.resize(1366, 768)
+    window.show()
+    qt_app.processEvents()
+
+    add_clip_y = window.add_button.mapTo(
+        window.annotation_panel, QPoint(0, 0)
+    ).y()
+    behaviors_y = window.behaviors_group.mapTo(
+        window.annotation_panel, QPoint(0, 0)
+    ).y()
+
+    assert add_clip_y < behaviors_y

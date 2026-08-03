@@ -145,7 +145,8 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 color: #f1f5f9;
             }
-            QPushButton:hover { background: #334155; border-color: #64748b; }
+            QPushButton:hover { background: #334155; border-color: #60a5fa; }
+            QPushButton:focus { border-color: #60a5fa; }
             QPushButton:pressed { background: #1e293b; }
             QPushButton:disabled { background: #1f2937; color: #64748b; border-color: #334155; }
             QPushButton#primaryButton { background: #2563eb; border-color: #3b82f6; color: #ffffff; }
@@ -364,9 +365,20 @@ class MainWindow(QMainWindow):
         time_form.addRow("Sequence", self.sequence_spin)
         layout.addLayout(time_form)
 
+        actions = QHBoxLayout()
+        self.add_button = QPushButton("Add Clip")
+        self.remove_button = QPushButton("Remove Selected")
+        self.clear_button = QPushButton("Clear Editor")
+        self.add_button.setObjectName("addClipButton")
+        self.remove_button.setObjectName("dangerButton")
+        actions.addWidget(self.add_button)
+        actions.addWidget(self.remove_button)
+        actions.addWidget(self.clear_button)
+        layout.addLayout(actions)
+
         self.behavior_checks: dict[str, QCheckBox] = {}
-        behaviors_group = QGroupBox("Behaviors")
-        behaviors_layout = QGridLayout(behaviors_group)
+        self.behaviors_group = QGroupBox("Behaviors")
+        behaviors_layout = QGridLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
         behaviors_layout.setHorizontalSpacing(10)
         behaviors_layout.setVerticalSpacing(4)
@@ -375,7 +387,7 @@ class MainWindow(QMainWindow):
             self.behavior_checks[behavior] = checkbox
             row, column = divmod(index, 2)
             behaviors_layout.addWidget(checkbox, row, column)
-        layout.addWidget(behaviors_group)
+        layout.addWidget(self.behaviors_group)
 
         labels_form = QFormLayout()
         self.polarity_combo = QComboBox()
@@ -391,17 +403,6 @@ class MainWindow(QMainWindow):
         self.filename_preview.setReadOnly(True)
         self.filename_preview.setToolTip("Generated output filename")
         layout.addWidget(self.filename_preview)
-
-        actions = QHBoxLayout()
-        self.add_button = QPushButton("Add Clip")
-        self.remove_button = QPushButton("Remove Selected")
-        self.clear_button = QPushButton("Clear Editor")
-        self.add_button.setObjectName("addClipButton")
-        self.remove_button.setObjectName("dangerButton")
-        actions.addWidget(self.add_button)
-        actions.addWidget(self.remove_button)
-        actions.addWidget(self.clear_button)
-        layout.addLayout(actions)
         return group
 
     def _build_task_table(self) -> QGroupBox:
