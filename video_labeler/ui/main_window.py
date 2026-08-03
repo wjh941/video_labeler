@@ -51,16 +51,16 @@ from ..naming import (
 
 
 TABLE_COLUMNS = (
-    "Sequence",
-    "Start",
-    "End",
-    "Duration",
-    "Behaviors",
-    "Polarity",
-    "Lighting",
-    "Output Filename",
-    "Status",
-    "Error",
+    "编号",
+    "开始",
+    "结束",
+    "时长",
+    "行为标签",
+    "正负性",
+    "光照",
+    "输出文件名",
+    "状态",
+    "错误信息",
 )
 
 
@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         self._editing_index: int | None = None
         self._export_worker: ExportWorker | None = None
 
-        self.setWindowTitle("Video Segment Labeler")
+        self.setWindowTitle("视频片段标注工具")
         self.setMinimumSize(1120, 720)
         self.resize(1440, 900)
 
@@ -223,19 +223,19 @@ class MainWindow(QMainWindow):
         )
 
     def _build_project_header(self) -> QGroupBox:
-        group = QGroupBox("Project")
+        group = QGroupBox("项目设置")
         layout = QGridLayout(group)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
         layout.setColumnStretch(4, 1)
 
-        self.open_video_button = QPushButton("Open Video")
-        self.import_csv_button = QPushButton("Import CSV")
-        self.save_csv_button = QPushButton("Save Annotation CSV")
-        self.output_folder_button = QPushButton("Output Folder")
-        self.export_button = QPushButton("Batch Export")
+        self.open_video_button = QPushButton("导入视频")
+        self.import_csv_button = QPushButton("导入 CSV")
+        self.save_csv_button = QPushButton("保存标注 CSV")
+        self.output_folder_button = QPushButton("选择输出文件夹")
+        self.export_button = QPushButton("批量导出")
         self.export_button.setObjectName("primaryButton")
-        self.output_folder_label = QLabel("No output folder selected")
+        self.output_folder_label = QLabel("未选择输出文件夹")
         self.output_folder_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -249,14 +249,14 @@ class MainWindow(QMainWindow):
         self.view_combo.addItems(VIEW_TYPES)
 
         self.ffmpeg_edit = QLineEdit()
-        self.ffmpeg_edit.setPlaceholderText("Leave empty to use FFmpeg on PATH")
+        self.ffmpeg_edit.setPlaceholderText("留空则使用 PATH 中的 FFmpeg")
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(("encode", "copy"))
-        self.overwrite_check = QCheckBox("Overwrite existing clips")
+        self.overwrite_check = QCheckBox("覆盖已有片段")
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(0, 64)
         self.workers_spin.setValue(0)
-        self.workers_spin.setSpecialValueText("Auto")
+        self.workers_spin.setSpecialValueText("自动")
 
         layout.addWidget(self.open_video_button, 0, 0)
         layout.addWidget(self.import_csv_button, 0, 1)
@@ -265,14 +265,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.output_folder_label, 0, 4)
         layout.addWidget(self.export_button, 0, 5)
 
-        layout.addWidget(QLabel("Date"), 1, 0)
+        layout.addWidget(QLabel("日期"), 1, 0)
         layout.addWidget(self.date_edit, 1, 1)
-        layout.addWidget(QLabel("Camera"), 1, 2)
+        layout.addWidget(QLabel("摄像头"), 1, 2)
         layout.addWidget(self.camera_edit, 1, 3)
-        layout.addWidget(QLabel("View"), 1, 4)
+        layout.addWidget(QLabel("视角"), 1, 4)
         layout.addWidget(self.view_combo, 1, 5)
 
-        self.advanced_export_group = QGroupBox("Export Options")
+        self.advanced_export_group = QGroupBox("导出设置")
         self.advanced_export_group.setCheckable(True)
         self.advanced_export_group.setChecked(False)
         advanced_layout = QVBoxLayout(self.advanced_export_group)
@@ -282,10 +282,10 @@ class MainWindow(QMainWindow):
         options_layout.setContentsMargins(0, 0, 0, 0)
         options_layout.addWidget(QLabel("FFmpeg"))
         options_layout.addWidget(self.ffmpeg_edit, stretch=1)
-        options_layout.addWidget(QLabel("Mode"))
+        options_layout.addWidget(QLabel("模式"))
         options_layout.addWidget(self.mode_combo)
         options_layout.addWidget(self.overwrite_check)
-        options_layout.addWidget(QLabel("Parallel"))
+        options_layout.addWidget(QLabel("并行数量"))
         options_layout.addWidget(self.workers_spin)
         advanced_layout.addWidget(self.advanced_export_content)
         self.advanced_export_content.setVisible(False)
@@ -293,7 +293,7 @@ class MainWindow(QMainWindow):
         return group
 
     def _build_video_panel(self) -> QGroupBox:
-        group = QGroupBox("Video Review")
+        group = QGroupBox("视频预览")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(7)
@@ -320,11 +320,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(position_layout)
 
         controls = QHBoxLayout()
-        self.play_button = QPushButton("Play")
+        self.play_button = QPushButton("播放")
         self.seek_back_button = QPushButton("-5s")
         self.seek_forward_button = QPushButton("+5s")
-        self.set_start_button = QPushButton("Set Start")
-        self.set_end_button = QPushButton("Set End")
+        self.set_start_button = QPushButton("设置起始点")
+        self.set_end_button = QPushButton("设置结束点")
         self.speed_combo = QComboBox()
         self.speed_combo.addItem("0.5x", 0.5)
         self.speed_combo.addItem("1.0x", 1.0)
@@ -338,18 +338,18 @@ class MainWindow(QMainWindow):
         controls.addStretch(1)
         controls.addWidget(self.set_start_button)
         controls.addWidget(self.set_end_button)
-        controls.addWidget(QLabel("Speed"))
+        controls.addWidget(QLabel("播放速度"))
         controls.addWidget(self.speed_combo)
         layout.addLayout(controls)
         return group
 
     def _build_clip_editor(self) -> QGroupBox:
-        group = QGroupBox("Clip Annotation")
+        group = QGroupBox("片段标注")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(7)
 
-        self.source_label = QLabel("No video selected")
+        self.source_label = QLabel("未选择视频")
         self.source_label.setWordWrap(True)
         self.source_label.setStyleSheet("color: #a8b3c2;")
         layout.addWidget(self.source_label)
@@ -360,15 +360,15 @@ class MainWindow(QMainWindow):
         self.sequence_spin = QSpinBox()
         self.sequence_spin.setRange(1, 999999)
         self.sequence_spin.setValue(1)
-        time_form.addRow("Start", self.start_spin)
-        time_form.addRow("End", self.end_spin)
-        time_form.addRow("Sequence", self.sequence_spin)
+        time_form.addRow("开始时间", self.start_spin)
+        time_form.addRow("结束时间", self.end_spin)
+        time_form.addRow("编号", self.sequence_spin)
         layout.addLayout(time_form)
 
         actions = QHBoxLayout()
-        self.add_button = QPushButton("Add Clip")
-        self.remove_button = QPushButton("Remove Selected")
-        self.clear_button = QPushButton("Clear Editor")
+        self.add_button = QPushButton("添加片段")
+        self.remove_button = QPushButton("删除所选")
+        self.clear_button = QPushButton("清空编辑区")
         self.add_button.setObjectName("addClipButton")
         self.remove_button.setObjectName("dangerButton")
         actions.addWidget(self.add_button)
@@ -377,7 +377,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.behavior_checks: dict[str, QCheckBox] = {}
-        self.behaviors_group = QGroupBox("Behaviors")
+        self.behaviors_group = QGroupBox("行为标签")
         behaviors_layout = QGridLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
         behaviors_layout.setHorizontalSpacing(10)
@@ -394,19 +394,19 @@ class MainWindow(QMainWindow):
         self.polarity_combo.addItems(POLARITIES)
         self.lighting_combo = QComboBox()
         self.lighting_combo.addItems(LIGHTING_VALUES)
-        labels_form.addRow("Polarity", self.polarity_combo)
-        labels_form.addRow("Lighting", self.lighting_combo)
+        labels_form.addRow("正负性", self.polarity_combo)
+        labels_form.addRow("光照", self.lighting_combo)
         layout.addLayout(labels_form)
 
-        layout.addWidget(QLabel("Generated filename"))
+        layout.addWidget(QLabel("生成的文件名"))
         self.filename_preview = QLineEdit()
         self.filename_preview.setReadOnly(True)
-        self.filename_preview.setToolTip("Generated output filename")
+        self.filename_preview.setToolTip("生成的输出文件名")
         layout.addWidget(self.filename_preview)
         return group
 
     def _build_task_table(self) -> QGroupBox:
-        group = QGroupBox("Clip Tasks")
+        group = QGroupBox("片段任务")
         layout = QVBoxLayout(group)
 
         self.task_table = QTableWidget(0, len(TABLE_COLUMNS))
@@ -433,11 +433,11 @@ class MainWindow(QMainWindow):
 
     def _build_export_status(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        self.cancel_export_button = QPushButton("Cancel Export")
+        self.cancel_export_button = QPushButton("取消导出")
         self.cancel_export_button.setEnabled(False)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
-        self.status_label = QLabel("Ready")
+        self.status_label = QLabel("就绪")
 
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.progress_bar, stretch=1)
@@ -498,14 +498,14 @@ class MainWindow(QMainWindow):
         self.source_path = path
         self.source_name = path.name
         self.source_label.setText(path.name)
-        self._set_status(f"Video selected: {path.name}")
+        self._set_status(f"已选择视频：{path.name}")
 
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "Open Video",
+            "导入视频",
             "",
-            "Video files (*.mp4 *.avi *.mkv *.mov *.m4v);;All files (*.*)",
+            "视频文件 (*.mp4 *.avi *.mkv *.mov *.m4v);;所有文件 (*.*)",
         )
         if not filename:
             return
@@ -516,14 +516,14 @@ class MainWindow(QMainWindow):
 
     def import_csv(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Import Clip CSV", "", "CSV files (*.csv)"
+            self, "导入片段 CSV", "", "CSV 文件 (*.csv)"
         )
         if not filename:
             return
         try:
             self.records = read_clip_csv(Path(filename))
         except (OSError, ValueError) as error:
-            self._show_error("Could not import CSV", str(error))
+            self._show_error("无法导入 CSV", str(error))
             return
 
         if self.records:
@@ -539,11 +539,11 @@ class MainWindow(QMainWindow):
             )
         self._editing_index = None
         self._refresh_table()
-        self._set_status(f"Imported {len(self.records)} task(s)")
+        self._set_status(f"已导入 {len(self.records)} 个任务")
 
     def save_csv(self) -> None:
         if not self.records:
-            self._show_error("No clip tasks", "Add at least one clip before saving CSV.")
+            self._show_error("没有片段任务", "保存 CSV 前请至少添加一个片段。")
             return
         default_name = (
             f"{Path(self.source_name).stem}_clips.csv"
@@ -552,28 +552,28 @@ class MainWindow(QMainWindow):
         )
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Annotation CSV",
+            "保存标注 CSV",
             default_name,
-            "CSV files (*.csv)",
+            "CSV 文件 (*.csv)",
         )
         if not filename:
             return
         try:
             write_clip_csv(Path(filename), self.records)
         except OSError as error:
-            self._show_error("Could not save CSV", str(error))
+            self._show_error("无法保存 CSV", str(error))
             return
-        self._set_status(f"Saved CSV: {filename}")
+        self._set_status(f"已保存 CSV：{filename}")
 
     def select_output_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(
-            self, "Select Output Folder", str(self.output_dir or Path.home())
+            self, "选择输出文件夹", str(self.output_dir or Path.home())
         )
         if not directory:
             return
         self.output_dir = Path(directory)
         self.output_folder_label.setText(str(self.output_dir))
-        self._set_status(f"Output folder: {self.output_dir}")
+        self._set_status(f"输出文件夹：{self.output_dir}")
 
     def set_clip_range(self, start_seconds: float, end_seconds: float) -> None:
         self.start_spin.setValue(start_seconds)
@@ -590,11 +590,11 @@ class MainWindow(QMainWindow):
         try:
             source = self.source_name.strip()
             if not source:
-                raise ValueError("Select a source video before adding a clip.")
+                raise ValueError("添加片段前请先选择源视频。")
             start_seconds = self.start_spin.value()
             end_seconds = self.end_spin.value()
             if end_seconds <= start_seconds:
-                raise ValueError("End time must be later than start time.")
+                raise ValueError("结束时间必须晚于开始时间。")
 
             metadata = ProjectMetadata(
                 date=self.date_edit.text().strip(),
@@ -610,7 +610,7 @@ class MainWindow(QMainWindow):
             )
             self._assert_output_is_unique(output)
         except ValueError as error:
-            self._show_error("Cannot add clip", str(error))
+            self._show_error("无法添加片段", str(error))
             return
 
         record = ClipRecord(
@@ -628,13 +628,13 @@ class MainWindow(QMainWindow):
             self.sequence_spin.setValue(
                 next_sequence([item.sequence for item in self.records])
             )
-            self._set_status(f"Added clip {sequence:03d}")
+            self._set_status(f"已添加片段 {sequence:03d}")
         else:
             self.records[self._editing_index] = record
-            self._set_status(f"Updated clip {sequence:03d}")
+            self._set_status(f"已更新片段 {sequence:03d}")
 
         self._editing_index = None
-        self.add_button.setText("Add Clip")
+        self.add_button.setText("添加片段")
         self._refresh_table()
 
     def remove_selected_clip(self) -> None:
@@ -644,9 +644,9 @@ class MainWindow(QMainWindow):
         row = selected[0].row()
         del self.records[row]
         self._editing_index = None
-        self.add_button.setText("Add Clip")
+        self.add_button.setText("添加片段")
         self._refresh_table()
-        self._set_status("Removed selected clip")
+        self._set_status("已删除所选片段")
 
     def clear_editor(self) -> None:
         self._editing_index = None
@@ -659,7 +659,7 @@ class MainWindow(QMainWindow):
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
-        self.add_button.setText("Add Clip")
+        self.add_button.setText("添加片段")
         self._update_filename_preview()
 
     def toggle_playback(self) -> None:
@@ -692,14 +692,14 @@ class MainWindow(QMainWindow):
 
     def _update_play_button(self, state: QMediaPlayer.PlaybackState) -> None:
         self.play_button.setText(
-            "Pause"
+            "暂停"
             if state == QMediaPlayer.PlaybackState.PlayingState
-            else "Play"
+            else "播放"
         )
 
     def _media_error(self, _error: QMediaPlayer.Error, text: str) -> None:
         if text:
-            self._set_status(f"Video playback error: {text}")
+            self._set_status(f"视频播放错误：{text}")
 
     def _update_filename_preview(self) -> None:
         try:
@@ -776,7 +776,7 @@ class MainWindow(QMainWindow):
             self.polarity_combo.setCurrentText(record.polarity)
         if record.lighting in LIGHTING_VALUES:
             self.lighting_combo.setCurrentText(record.lighting)
-        self.add_button.setText("Update Clip")
+        self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()
 
@@ -790,7 +790,7 @@ class MainWindow(QMainWindow):
         try:
             validate_output_filename(output)
         except ValueError as error:
-            self._show_error("Invalid filename", str(error))
+            self._show_error("文件名无效", str(error))
             self._refresh_table()
             return
         try:
@@ -800,23 +800,23 @@ class MainWindow(QMainWindow):
             self._editing_index = editing_index
         except ValueError as error:
             self._editing_index = editing_index
-            self._show_error("Duplicate filename", str(error))
+            self._show_error("文件名重复", str(error))
             self._refresh_table()
             return
         self.records[row].output = output
-        self._set_status(f"Updated output filename for clip {row + 1}")
+        self._set_status(f"已更新片段 {row + 1} 的输出文件名")
 
     def start_export(self) -> None:
         if self._export_worker is not None and self._export_worker.isRunning():
             return
         if self.source_path is None or not self.source_path.is_file():
-            self._show_error("No video source", "Open the source video before exporting.")
+            self._show_error("没有视频源", "导出前请先导入源视频。")
             return
         if not self.records:
-            self._show_error("No clip tasks", "Add at least one clip before exporting.")
+            self._show_error("没有片段任务", "导出前请至少添加一个片段。")
             return
         if self.output_dir is None:
-            self._show_error("No output folder", "Select an output folder before exporting.")
+            self._show_error("没有输出文件夹", "导出前请先选择输出文件夹。")
             return
 
         try:
@@ -830,7 +830,7 @@ class MainWindow(QMainWindow):
             for record in self.records:
                 validate_output_filename(record.output)
         except (OSError, RuntimeError, ValueError) as error:
-            self._show_error("Cannot start export", str(error))
+            self._show_error("无法开始导出", str(error))
             return
 
         self._export_worker = ExportWorker(
@@ -849,14 +849,14 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.export_button.setEnabled(False)
         self.cancel_export_button.setEnabled(True)
-        self._set_status("Exporting clips...")
+        self._set_status("正在导出片段……")
         self._export_worker.start()
 
     def cancel_export(self) -> None:
         if self._export_worker is not None:
             self._export_worker.cancel()
             self.cancel_export_button.setEnabled(False)
-            self._set_status("Cancel requested. Finishing active FFmpeg tasks...")
+            self._set_status("已请求取消，正在完成当前 FFmpeg 任务……")
 
     def _export_clip_finished(self, _index: int, _result: object) -> None:
         self._refresh_table()
@@ -871,9 +871,9 @@ class MainWindow(QMainWindow):
         self.cancel_export_button.setEnabled(False)
         self._export_worker = None
         self._set_status(
-            "Export complete: "
-            f"success={summary.success} skipped={summary.skipped} "
-            f"failed={summary.failed} canceled={summary.canceled}"
+            "导出完成："
+            f"成功={summary.success} 跳过={summary.skipped} "
+            f"失败={summary.failed} 已取消={summary.canceled}"
         )
 
     def _show_error(self, title: str, text: str) -> None:

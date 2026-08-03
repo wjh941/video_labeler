@@ -8,6 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
 
+from video_labeler.models import BEHAVIOR_LABELS, LIGHTING_VALUES, POLARITIES
+
 try:
     from video_labeler.ui.main_window import MainWindow
 except ImportError:
@@ -17,6 +19,22 @@ except ImportError:
 @pytest.fixture(scope="module")
 def qt_app():
     return QApplication.instance() or QApplication([])
+
+
+def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
+    window = MainWindow()
+
+    assert window.windowTitle() == "视频片段标注工具"
+    assert window.open_video_button.text() == "导入视频"
+    assert window.import_csv_button.text() == "导入 CSV"
+    assert window.output_folder_button.text() == "选择输出文件夹"
+    assert window.export_button.text() == "批量导出"
+    assert window.add_button.text() == "添加片段"
+    assert window.cancel_export_button.text() == "取消导出"
+    assert window.task_table.horizontalHeaderItem(0).text() == "编号"
+    assert window.behavior_checks[BEHAVIOR_LABELS[0]].text() == "strangers_climbs"
+    assert window.polarity_combo.itemText(0) == "pos"
+    assert window.lighting_combo.itemText(0) == "daytime"
 
 
 def test_adding_clips_generates_sequential_task_filenames(qt_app, tmp_path):
