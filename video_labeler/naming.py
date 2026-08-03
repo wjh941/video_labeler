@@ -3,9 +3,6 @@ import re
 
 from .models import (
     BEHAVIOR_LABELS,
-    LIGHTING_VALUES,
-    POLARITIES,
-    VIEW_TYPES,
     ProjectMetadata,
 )
 

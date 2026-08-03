@@ -900,6 +900,18 @@ class MainWindow(QMainWindow):
         parsed = parse_filename(record.output)
         if parsed is not None:
             self._restore_parsed_metadata(parsed)
+        if record.polarity:
+            self._set_custom_combo_value(
+                self.polarity_combo,
+                record.polarity,
+                lambda value: normalize_label_token(value, "polarity"),
+            )
+        if record.lighting:
+            self._set_custom_combo_value(
+                self.lighting_combo,
+                record.lighting,
+                lambda value: normalize_label_token(value, "lighting"),
+            )
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()

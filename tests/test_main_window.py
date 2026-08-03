@@ -199,6 +199,31 @@ def test_selecting_custom_metadata_record_restores_all_metadata_combos(qt_app):
     assert window.lighting_combo.currentText() == "night_red"
 
 
+def test_selecting_manually_renamed_record_restores_stored_custom_labels(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="cam02.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="manual.mp4",
+            behaviors=("dog_out",),
+            polarity="needs_review",
+            lighting="night_red",
+            sequence=1,
+        )
+    ]
+    window._refresh_table()
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window.polarity_combo.currentText() == "needs_review"
+    assert window.polarity_combo.findText("needs_review") >= 0
+    assert window.lighting_combo.currentText() == "night_red"
+    assert window.lighting_combo.findText("night_red") >= 0
+
+
 def test_task_table_displays_chinese_status_without_changing_record_status(qt_app):
     window = MainWindow()
     statuses = ("queued", "ok", "skip", "fail", "canceled")
