@@ -5,7 +5,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QSlider
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
 
 try:
     from video_labeler.ui.main_window import MainWindow
@@ -51,3 +52,20 @@ def test_main_window_uses_a_draggable_timeline_slider(qt_app):
     window = MainWindow()
 
     assert isinstance(window.timeline_slider, QSlider)
+
+
+def test_main_window_uses_resizable_workspace_splitters(qt_app):
+    window = MainWindow()
+
+    assert isinstance(window.workspace_splitter, QSplitter)
+    assert window.workspace_splitter.orientation() == Qt.Orientation.Vertical
+    assert isinstance(window.editor_splitter, QSplitter)
+    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
+
+
+def test_annotation_controls_are_wrapped_in_a_scroll_area(qt_app):
+    window = MainWindow()
+
+    assert isinstance(window.annotation_scroll, QScrollArea)
+    assert window.annotation_scroll.widget() is window.annotation_panel
+    assert window.annotation_scroll.widgetResizable()
