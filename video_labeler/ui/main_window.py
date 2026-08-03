@@ -62,6 +62,13 @@ TABLE_COLUMNS = (
     "状态",
     "错误信息",
 )
+STATUS_LABELS = {
+    "queued": "排队中",
+    "ok": "成功",
+    "skip": "已跳过",
+    "fail": "失败",
+    "canceled": "已取消",
+}
 
 
 class MainWindow(QMainWindow):
@@ -523,7 +530,7 @@ class MainWindow(QMainWindow):
         try:
             self.records = read_clip_csv(Path(filename))
         except (OSError, ValueError) as error:
-            self._show_error("无法导入 CSV", str(error))
+            self._show_error("无法导入 CSV", f"导入 CSV 失败：{error}")
             return
 
         if self.records:
@@ -561,7 +568,7 @@ class MainWindow(QMainWindow):
         try:
             write_clip_csv(Path(filename), self.records)
         except OSError as error:
-            self._show_error("无法保存 CSV", str(error))
+            self._show_error("无法保存 CSV", f"保存 CSV 失败：{error}")
             return
         self._set_status(f"已保存 CSV：{filename}")
 
@@ -610,7 +617,7 @@ class MainWindow(QMainWindow):
             )
             self._assert_output_is_unique(output)
         except ValueError as error:
-            self._show_error("无法添加片段", str(error))
+            self._show_error("无法添加片段", f"添加片段失败：{error}")
             return
 
         record = ClipRecord(
@@ -723,7 +730,7 @@ class MainWindow(QMainWindow):
     def _assert_output_is_unique(self, output: str) -> None:
         for index, record in enumerate(self.records):
             if index != self._editing_index and record.output.lower() == output.lower():
-                raise ValueError(f"Duplicate output filename: {output}")
+                raise ValueError(f"输出文件名重复：{output}")
 
     def _refresh_table(self) -> None:
         with QSignalBlocker(self.task_table):
@@ -738,7 +745,7 @@ class MainWindow(QMainWindow):
                     record.polarity,
                     record.lighting,
                     record.output,
-                    record.status,
+                    STATUS_LABELS.get(record.status, record.status),
                     record.error,
                 )
                 for column, value in enumerate(values):
@@ -823,14 +830,14 @@ class MainWindow(QMainWindow):
             ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
             self.output_dir.mkdir(parents=True, exist_ok=True)
             if not self.output_dir.is_dir():
-                raise OSError("output path is not a folder")
+                raise OSError("输出路径不是文件夹")
             outputs = [record.output.lower() for record in self.records]
             if len(outputs) != len(set(outputs)):
-                raise ValueError("The task list contains duplicate output filenames.")
+                raise ValueError("任务列表中包含重复的输出文件名。")
             for record in self.records:
                 validate_output_filename(record.output)
         except (OSError, RuntimeError, ValueError) as error:
-            self._show_error("无法开始导出", str(error))
+            self._show_error("无法开始导出", f"开始导出失败：{error}")
             return
 
         self._export_worker = ExportWorker(

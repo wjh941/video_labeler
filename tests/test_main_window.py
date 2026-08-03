@@ -5,10 +5,15 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
+from PySide6.QtCore import QPoint, QSignalBlocker, Qt
+from PySide6.QtWidgets import QApplication, QMessageBox, QScrollArea, QSlider, QSplitter
 
-from video_labeler.models import BEHAVIOR_LABELS, LIGHTING_VALUES, POLARITIES
+from video_labeler.models import (
+    BEHAVIOR_LABELS,
+    LIGHTING_VALUES,
+    POLARITIES,
+    ClipRecord,
+)
 
 try:
     from video_labeler.ui.main_window import MainWindow
@@ -35,6 +40,68 @@ def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
     assert window.behavior_checks[BEHAVIOR_LABELS[0]].text() == "strangers_climbs"
     assert window.polarity_combo.itemText(0) == "pos"
     assert window.lighting_combo.itemText(0) == "daytime"
+
+
+def test_task_table_displays_chinese_status_without_changing_record_status(qt_app):
+    window = MainWindow()
+    statuses = ("queued", "ok", "skip", "fail", "canceled")
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output=f"clip-{index}.mp4",
+            sequence=index,
+            status=status,
+        )
+        for index, status in enumerate(statuses, start=1)
+    ]
+
+    window._refresh_table()
+
+    assert [window.task_table.item(row, 8).text() for row in range(5)] == [
+        "排队中",
+        "成功",
+        "已跳过",
+        "失败",
+        "已取消",
+    ]
+    assert [record.status for record in window.records] == list(statuses)
+
+
+def test_duplicate_filename_error_uses_chinese_context_and_keeps_filename(
+    qt_app, monkeypatch
+):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="first.mp4",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=2,
+            end_seconds=3,
+            output="second.mp4",
+            sequence=2,
+        ),
+    ]
+    window._refresh_table()
+    with QSignalBlocker(window.task_table):
+        window.task_table.item(1, 7).setText("first.mp4")
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda _parent, title, text: messages.append((title, text))),
+    )
+
+    window._table_cell_changed(1, 7)
+
+    assert messages == [("文件名重复", "输出文件名重复：first.mp4")]
 
 
 def test_adding_clips_generates_sequential_task_filenames(qt_app, tmp_path):
