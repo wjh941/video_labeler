@@ -24,3 +24,14 @@ def test_light_fresh_theme_loads_global_dialog_and_tooltip_rules():
         "QToolTip",
     ):
         assert selector in stylesheet
+
+
+def test_light_theme_keeps_file_dialog_browser_views_unforced():
+    stylesheet = load_light_fresh_theme()
+
+    assert "QFileDialog QListView" not in stylesheet
+    assert "QFileDialog QTreeView" not in stylesheet
+    assert "QFileDialog {" in stylesheet
+    assert "QFileDialog QLineEdit" in stylesheet
+    assert "QFileDialog QPushButton" in stylesheet
+    assert "QFileDialog QComboBox" in stylesheet

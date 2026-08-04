@@ -3,6 +3,13 @@ QMainWindow, QDialog, QMessageBox, QInputDialog, QFileDialog {
     color: #303133;
 }
 
+QFileDialog QLineEdit,
+QFileDialog QPushButton,
+QFileDialog QComboBox {
+    background: #FFFFFF;
+    color: #303133;
+}
+
 QWidget {
     color: #303133;
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
@@ -81,6 +88,25 @@ QPushButton#primaryButton, QPushButton#addClipButton {
     background: #409EFF;
     border-color: #409EFF;
     color: #FFFFFF;
+}
+
+QPushButton#undoButton,
+QPushButton#redoButton {
+    background: #FFFFFF;
+    border-color: #DCDFE6;
+    color: #409EFF;
+}
+
+QPushButton#undoButton:hover,
+QPushButton#redoButton:hover {
+    background: #ECF5FF;
+    border-color: #A0CFFF;
+}
+
+QComboBox#projectVideoCombo {
+    background: #FFFFFF;
+    border-color: #DCDFE6;
+    color: #303133;
 }
 
 QPushButton#primaryButton:hover, QPushButton#addClipButton:hover {
