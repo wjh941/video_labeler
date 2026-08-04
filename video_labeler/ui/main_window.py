@@ -3,6 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QAbstractAnimation,
     QEasingCurve,
     QEvent,
     QItemSelectionModel,
@@ -537,7 +538,7 @@ class MainWindow(QMainWindow):
             self.behavior_checks_layout.setColumnStretch(column, 0)
         rows = (len(self.behavior_checks) + columns - 1) // columns
         for index, checkbox in enumerate(self.behavior_checks.values()):
-            column, row = divmod(index, rows)
+            row, column = divmod(index, columns)
             self.behavior_checks_layout.addWidget(checkbox, row, column)
         for column in range(columns):
             self.behavior_checks_layout.setColumnMinimumWidth(
@@ -552,23 +553,17 @@ class MainWindow(QMainWindow):
     def _behavior_layout_for_width(self, available_width: int) -> tuple[int, list[int]]:
         checks = list(self.behavior_checks.values())
         spacing = self.behavior_checks_layout.horizontalSpacing()
-        fallback_rows = (len(checks) + 1) // 2
-        fallback_widths = [
-            max(
-                checkbox.sizeHint().width()
-                for checkbox in checks[:fallback_rows]
-            ),
-            max(
-                checkbox.sizeHint().width()
-                for checkbox in checks[fallback_rows:]
-            ),
-        ]
+        fallback_widths = [0, 0]
+        for index, checkbox in enumerate(checks):
+            column = index % 2
+            fallback_widths[column] = max(
+                fallback_widths[column], checkbox.sizeHint().width()
+            )
 
         for columns in range(4, 1, -1):
-            rows = (len(checks) + columns - 1) // columns
             column_widths = [0] * columns
             for index, checkbox in enumerate(checks):
-                column = index // rows
+                column = index % columns
                 column_widths[column] = max(
                     column_widths[column], checkbox.sizeHint().width()
                 )
@@ -595,7 +590,11 @@ class MainWindow(QMainWindow):
         self.behaviors_group.updateGeometry()
 
     def _restore_behavior_content_height(self) -> None:
-        if self.behaviors_group.isChecked():
+        if (
+            self.behaviors_group.isChecked()
+            and self.behaviors_group._animation.state()
+            != QAbstractAnimation.State.Running
+        ):
             self.behavior_checks_container.setMaximumHeight(
                 CollapsibleGroupBox._UNRESTRICTED_HEIGHT
             )

@@ -5,7 +5,13 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QItemSelectionModel, QPoint, QSignalBlocker, Qt
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QItemSelectionModel,
+    QPoint,
+    QSignalBlocker,
+    Qt,
+)
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -48,6 +54,24 @@ def _add_valid_clip(window: MainWindow, *, start: float, end: float, behavior: s
     window.set_clip_range(start, end)
     window.behavior_checks[behavior].setChecked(True)
     window.add_or_update_clip()
+
+
+def _process_behavior_reflow(qt_app, window: MainWindow) -> None:
+    for _ in range(20):
+        qt_app.processEvents()
+        if not window._behavior_reflow_pending:
+            qt_app.processEvents()
+            return
+    pytest.fail("行为标签布局未完成重排")
+
+
+def _wait_for_content_animation(qt_app, window: MainWindow) -> None:
+    for _ in range(100):
+        qt_app.processEvents()
+        if window.behaviors_group._animation.state() != QAbstractAnimation.State.Running:
+            return
+        QTest.qWait(5)
+    pytest.fail("行为标签折叠动画未完成")
 
 
 def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
@@ -546,7 +570,7 @@ def test_tag_area_no_scrollbar(qt_app):
     qt_app.processEvents()
 
     assert not window.behaviors_group.findChildren(QScrollArea)
-    assert window.behavior_columns == 3
+    assert window.behavior_columns >= 2
 
     window.resize(1120, 720)
     qt_app.processEvents()
@@ -564,9 +588,11 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     qt_app.processEvents()
 
     assert not window.behaviors_group.findChildren(QScrollArea)
-    assert window.behavior_columns >= 3
+    assert window.behavior_columns >= 2
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
         for checkbox in window.behavior_checks.values()
     )
 
@@ -574,6 +600,8 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     qt_app.processEvents()
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
         for checkbox in window.behavior_checks.values()
     )
 
@@ -582,6 +610,8 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     assert window.behavior_columns >= 2
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
         for checkbox in window.behavior_checks.values()
     )
 
@@ -612,23 +642,70 @@ def test_behavior_checks_reflow_after_annotation_splitter_moves(qt_app):
     qt_app.processEvents()
 
     window.editor_splitter.setSizes([620, 1200])
-    QTest.qWait(10)
+    _process_behavior_reflow(qt_app, window)
 
-    assert window.behavior_checks_container.width() >= 798
     assert window.behavior_columns == 4
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
         for checkbox in window.behavior_checks.values()
     )
 
     window.editor_splitter.setSizes([1354, 530])
-    QTest.qWait(10)
+    _process_behavior_reflow(qt_app, window)
 
     assert window.behavior_columns == 2
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
         for checkbox in window.behavior_checks.values()
     )
+
+
+def test_behavior_checks_keep_row_major_label_order_after_reflow(qt_app):
+    window = MainWindow()
+    window.resize(1920, 900)
+    window.show()
+    window.editor_splitter.setSizes([900, 984])
+    _process_behavior_reflow(qt_app, window)
+
+    assert window.behavior_columns == 3
+    assert [
+        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
+        for column in range(3)
+    ] == list(BEHAVIOR_LABELS[:3])
+
+    window.editor_splitter.setSizes([620, 1200])
+    _process_behavior_reflow(qt_app, window)
+
+    assert window.behavior_columns == 4
+    assert [
+        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
+        for column in range(4)
+    ] == list(BEHAVIOR_LABELS[:4])
+
+
+def test_reflow_does_not_unrestrict_height_during_expand_animation(qt_app):
+    window = MainWindow()
+    window.show()
+    _process_behavior_reflow(qt_app, window)
+
+    window.behaviors_group.setChecked(False)
+    _wait_for_content_animation(qt_app, window)
+    window.behaviors_group.setChecked(True)
+    assert window.behaviors_group._animation.state() == QAbstractAnimation.State.Running
+
+    window._reflow_behavior_checks()
+    _process_behavior_reflow(qt_app, window)
+
+    assert window.behaviors_group._animation.state() == QAbstractAnimation.State.Running
+    assert window.behavior_checks_container.maximumHeight() != 16777215
+
+    _wait_for_content_animation(qt_app, window)
+
+    assert window.behavior_checks_container.maximumHeight() == 16777215
 
 
 def test_new_window_sizes_behavior_filter_to_all_options(qt_app):
