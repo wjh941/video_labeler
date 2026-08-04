@@ -550,11 +550,85 @@ def test_tag_area_no_scrollbar(qt_app):
 
     window.resize(1120, 720)
     qt_app.processEvents()
-    assert window.behavior_columns == 2
+    assert window.behavior_columns >= 2
 
     assert window.view_combo.maxVisibleItems() == window.view_combo.count()
     assert window.polarity_combo.maxVisibleItems() == window.polarity_combo.count()
     assert window.lighting_combo.maxVisibleItems() == window.lighting_combo.count()
+
+
+def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert not window.behaviors_group.findChildren(QScrollArea)
+    assert window.behavior_columns >= 3
+    assert all(
+        checkbox.width() >= checkbox.sizeHint().width()
+        for checkbox in window.behavior_checks.values()
+    )
+
+    window.resize(1280, 900)
+    qt_app.processEvents()
+    assert all(
+        checkbox.width() >= checkbox.sizeHint().width()
+        for checkbox in window.behavior_checks.values()
+    )
+
+    window.resize(1120, 720)
+    qt_app.processEvents()
+    assert window.behavior_columns >= 2
+    assert all(
+        checkbox.width() >= checkbox.sizeHint().width()
+        for checkbox in window.behavior_checks.values()
+    )
+
+
+def test_collapsible_behavior_group_recalculates_expanded_height_after_reflow(qt_app):
+    window = MainWindow()
+    window.show()
+    window.resize(1440, 900)
+    qt_app.processEvents()
+
+    window.behaviors_group.setChecked(False)
+    QTest.qWait(350)
+    window.resize(1280, 900)
+    window.behaviors_group.setChecked(True)
+    QTest.qWait(350)
+    qt_app.processEvents()
+
+    assert window.behavior_checks_container.maximumHeight() == 16777215
+    assert window.behavior_checks_container.height() >= (
+        window.behavior_checks_container.sizeHint().height()
+    )
+
+
+def test_behavior_checks_reflow_after_annotation_splitter_moves(qt_app):
+    window = MainWindow()
+    window.resize(1920, 900)
+    window.show()
+    qt_app.processEvents()
+
+    window.editor_splitter.setSizes([620, 1200])
+    QTest.qWait(10)
+
+    assert window.behavior_checks_container.width() >= 798
+    assert window.behavior_columns == 4
+    assert all(
+        checkbox.width() >= checkbox.sizeHint().width()
+        for checkbox in window.behavior_checks.values()
+    )
+
+    window.editor_splitter.setSizes([1354, 530])
+    QTest.qWait(10)
+
+    assert window.behavior_columns == 2
+    assert all(
+        checkbox.width() >= checkbox.sizeHint().width()
+        for checkbox in window.behavior_checks.values()
+    )
 
 
 def test_new_window_sizes_behavior_filter_to_all_options(qt_app):

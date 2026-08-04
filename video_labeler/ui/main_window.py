@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEvent,
     QItemSelectionModel,
     QParallelAnimationGroup,
     QPropertyAnimation,
@@ -46,6 +47,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSlider,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -266,8 +268,9 @@ class MainWindow(QMainWindow):
         self.annotation_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
+        self.annotation_scroll.installEventFilter(self)
         self.editor_splitter.addWidget(self.annotation_scroll)
-        self.editor_splitter.setSizes([980, 380])
+        self.editor_splitter.setSizes([616, 788])
 
         self.workspace_splitter.addWidget(self.editor_splitter)
         self.workspace_splitter.addWidget(self._build_task_table())
@@ -469,11 +472,13 @@ class MainWindow(QMainWindow):
         self.behaviors_group = CollapsibleGroupBox("行为标签")
         self.behaviors_group.setObjectName("collapsibleBehaviorGroup")
         self.behavior_checks_container = QWidget()
+        self.behavior_checks_container.installEventFilter(self)
         self.behavior_checks_layout = QGridLayout(self.behavior_checks_container)
         self.behavior_checks_layout.setContentsMargins(0, 0, 0, 0)
         self.behavior_checks_layout.setHorizontalSpacing(10)
         self.behavior_checks_layout.setVerticalSpacing(4)
         self.behavior_columns = 2
+        self._behavior_reflow_pending = False
 
         behaviors_layout = QVBoxLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
@@ -515,18 +520,100 @@ class MainWindow(QMainWindow):
         return group
 
     def _reflow_behavior_checks(self) -> None:
-        columns = 3 if self.width() >= 1280 else 2
+        self._behavior_reflow_pending = False
+        available_width = self.behavior_checks_container.width()
+        if available_width <= 0:
+            available_width = self.behavior_checks_container.sizeHint().width()
+        columns, column_widths = self._behavior_layout_for_width(available_width)
         self.behavior_columns = columns
+        for checkbox in self.behavior_checks.values():
+            checkbox.setSizePolicy(
+                QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+            )
         while self.behavior_checks_layout.count():
             self.behavior_checks_layout.takeAt(0)
+        for column in range(4):
+            self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
+            self.behavior_checks_layout.setColumnStretch(column, 0)
+        rows = (len(self.behavior_checks) + columns - 1) // columns
         for index, checkbox in enumerate(self.behavior_checks.values()):
-            row, column = divmod(index, columns)
+            column, row = divmod(index, rows)
             self.behavior_checks_layout.addWidget(checkbox, row, column)
+        for column in range(columns):
+            self.behavior_checks_layout.setColumnMinimumWidth(
+                column, column_widths[column]
+            )
+            self.behavior_checks_layout.setColumnStretch(column, 1)
+        self.behavior_checks_container.updateGeometry()
+        self.behaviors_group.updateGeometry()
+        if self.behaviors_group.isChecked():
+            QTimer.singleShot(0, self._restore_behavior_content_height)
+
+    def _behavior_layout_for_width(self, available_width: int) -> tuple[int, list[int]]:
+        checks = list(self.behavior_checks.values())
+        spacing = self.behavior_checks_layout.horizontalSpacing()
+        fallback_rows = (len(checks) + 1) // 2
+        fallback_widths = [
+            max(
+                checkbox.sizeHint().width()
+                for checkbox in checks[:fallback_rows]
+            ),
+            max(
+                checkbox.sizeHint().width()
+                for checkbox in checks[fallback_rows:]
+            ),
+        ]
+
+        for columns in range(4, 1, -1):
+            rows = (len(checks) + columns - 1) // columns
+            column_widths = [0] * columns
+            for index, checkbox in enumerate(checks):
+                column = index // rows
+                column_widths[column] = max(
+                    column_widths[column], checkbox.sizeHint().width()
+                )
+            required_width = sum(column_widths) + spacing * (columns - 1)
+            if required_width <= available_width:
+                return columns, column_widths
+
+        return 2, fallback_widths
+
+    def _schedule_behavior_reflow(self) -> None:
+        if self._behavior_reflow_pending:
+            return
+        self._behavior_reflow_pending = True
+        QTimer.singleShot(0, self._reflow_behavior_checks)
+
+    def _release_behavior_width_constraints(self) -> None:
+        for column in range(4):
+            self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
+        for checkbox in self.behavior_checks.values():
+            checkbox.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+        self.behavior_checks_container.updateGeometry()
+        self.behaviors_group.updateGeometry()
+
+    def _restore_behavior_content_height(self) -> None:
+        if self.behaviors_group.isChecked():
+            self.behavior_checks_container.setMaximumHeight(
+                CollapsibleGroupBox._UNRESTRICTED_HEIGHT
+            )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "behavior_checks_layout"):
-            self._reflow_behavior_checks()
+            self._schedule_behavior_reflow()
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() != QEvent.Type.Resize:
+            return super().eventFilter(watched, event)
+        if watched is getattr(self, "annotation_scroll", None):
+            self._release_behavior_width_constraints()
+            self._schedule_behavior_reflow()
+        elif watched is getattr(self, "behavior_checks_container", None):
+            self._schedule_behavior_reflow()
+        return super().eventFilter(watched, event)
 
     def _build_task_table(self) -> QGroupBox:
         group = QGroupBox("片段任务")
@@ -728,6 +815,9 @@ class MainWindow(QMainWindow):
         self.player.errorOccurred.connect(self._media_error)
         self.advanced_export_group.toggled.connect(
             self.advanced_export_content.setVisible
+        )
+        self.editor_splitter.splitterMoved.connect(
+            lambda _position, _index: self._schedule_behavior_reflow()
         )
 
         self.date_edit.textChanged.connect(self._update_filename_preview)
