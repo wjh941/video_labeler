@@ -106,6 +106,8 @@ TABLE_COLUMNS = (
 )
 BEHAVIOR_COLUMN_PADDING = 16
 CUSTOM_OPTION_TEXT = "自定义..."
+CUSTOM_PLAYBACK_RATE_TEXT = "自定义"
+PLAYBACK_RATE_PRESETS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0)
 STATUS_LABELS = {
     "queued": "排队中",
     "ok": "成功",
@@ -240,6 +242,7 @@ class MainWindow(QMainWindow):
         self._export_worker: ExportWorker | None = None
         self._export_records: list[ClipRecord] = []
         self._export_record_states: list[tuple[str, str]] = []
+        self._last_playback_rate = 1.0
 
         self.setWindowTitle("视频片段标注工具")
         self.setMinimumSize(1120, 720)
@@ -468,11 +471,17 @@ class MainWindow(QMainWindow):
         self.set_start_button = QPushButton("设置起始点")
         self.set_end_button = QPushButton("设置结束点")
         self.speed_combo = QComboBox()
-        self.speed_combo.addItem("0.5x", 0.5)
-        self.speed_combo.addItem("1.0x", 1.0)
-        self.speed_combo.addItem("1.5x", 1.5)
-        self.speed_combo.addItem("2.0x", 2.0)
-        self.speed_combo.setCurrentIndex(1)
+        for rate in PLAYBACK_RATE_PRESETS:
+            self.speed_combo.addItem(f"{rate}x", rate)
+        self.speed_combo.addItem(CUSTOM_PLAYBACK_RATE_TEXT, None)
+        self.speed_combo.setCurrentIndex(self.speed_combo.findData(1.0))
+        self.custom_speed_spin = QDoubleSpinBox()
+        self.custom_speed_spin.setRange(0.1, 4.0)
+        self.custom_speed_spin.setDecimals(3)
+        self.custom_speed_spin.setSingleStep(0.1)
+        self.custom_speed_spin.setKeyboardTracking(False)
+        self.custom_speed_spin.setSuffix("x")
+        self.custom_speed_spin.setValue(self._last_playback_rate)
 
         controls.addWidget(self.play_button)
         controls.addWidget(self.seek_back_button)
@@ -482,6 +491,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.set_end_button)
         controls.addWidget(QLabel("播放速度"))
         controls.addWidget(self.speed_combo)
+        controls.addWidget(self.custom_speed_spin)
         video_controls_layout.addLayout(controls)
         layout.addWidget(self.video_controls_panel)
         return group
@@ -900,7 +910,10 @@ class MainWindow(QMainWindow):
         self.set_start_button.clicked.connect(self._set_start_from_player)
         self.set_end_button.clicked.connect(self._set_end_from_player)
         self.timeline_slider.valueChanged.connect(self._seek_to_milliseconds)
-        self.speed_combo.currentIndexChanged.connect(self._set_playback_rate)
+        self.speed_combo.currentIndexChanged.connect(self._on_speed_preset_changed)
+        self.custom_speed_spin.editingFinished.connect(
+            self._on_custom_speed_committed
+        )
         self.player.positionChanged.connect(self._update_position)
         self.player.durationChanged.connect(self._update_duration)
         self.player.playbackStateChanged.connect(self._update_play_button)
@@ -1530,8 +1543,40 @@ class MainWindow(QMainWindow):
         if milliseconds != self.player.position():
             self.player.setPosition(milliseconds)
 
-    def _set_playback_rate(self) -> None:
-        self.player.setPlaybackRate(float(self.speed_combo.currentData()))
+    def _on_speed_preset_changed(self) -> None:
+        rate = self.speed_combo.currentData()
+        if rate is None:
+            self.custom_speed_spin.setFocus()
+            self.custom_speed_spin.selectAll()
+            return
+        self._apply_playback_rate(float(rate))
+
+    def _on_custom_speed_committed(self) -> None:
+        self._apply_playback_rate(self.custom_speed_spin.value())
+
+    def _apply_playback_rate(self, rate: float) -> bool:
+        if not 0.1 <= rate <= 4.0:
+            self._sync_playback_rate_controls(self._last_playback_rate)
+            self._set_status("播放速度需在 0.1x 到 4.0x 之间")
+            return False
+
+        self.player.setPlaybackRate(rate)
+        self._last_playback_rate = rate
+        self._sync_playback_rate_controls(rate)
+        return True
+
+    def _sync_playback_rate_controls(self, rate: float) -> None:
+        with QSignalBlocker(self.speed_combo), QSignalBlocker(
+            self.custom_speed_spin
+        ):
+            self.custom_speed_spin.setValue(rate)
+            preset_index = self.speed_combo.findData(rate)
+            if preset_index >= 0:
+                self.speed_combo.setCurrentIndex(preset_index)
+            else:
+                self.speed_combo.setCurrentIndex(
+                    self.speed_combo.findData(None)
+                )
 
     def _update_position(self, milliseconds: int) -> None:
         with QSignalBlocker(self.timeline_slider):

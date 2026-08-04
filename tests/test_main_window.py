@@ -1584,11 +1584,62 @@ def test_editable_metadata_combos_include_custom_action(qt_app):
         "copy",
     ]
     assert [window.speed_combo.itemText(index) for index in range(window.speed_combo.count())] == [
+        "0.25x",
         "0.5x",
+        "0.75x",
         "1.0x",
+        "1.25x",
         "1.5x",
         "2.0x",
+        "3.0x",
+        "4.0x",
+        "自定义",
     ]
+
+
+def test_playback_rate_controls_apply_presets_and_custom_values(qt_app):
+    window = MainWindow()
+
+    assert [
+        window.speed_combo.itemText(index)
+        for index in range(window.speed_combo.count())
+    ] == [
+        "0.25x",
+        "0.5x",
+        "0.75x",
+        "1.0x",
+        "1.25x",
+        "1.5x",
+        "2.0x",
+        "3.0x",
+        "4.0x",
+        "自定义",
+    ]
+    assert window.custom_speed_spin.minimum() == pytest.approx(0.1)
+    assert window.custom_speed_spin.maximum() == pytest.approx(4.0)
+
+    window.speed_combo.setCurrentText("1.5x")
+
+    assert window.player.playbackRate() == pytest.approx(1.5)
+    assert window.custom_speed_spin.value() == pytest.approx(1.5)
+
+    window.custom_speed_spin.setValue(1.7)
+    window._on_custom_speed_committed()
+
+    assert window.player.playbackRate() == pytest.approx(1.7)
+    assert window.speed_combo.currentText() == "自定义"
+
+
+def test_invalid_playback_rate_restores_the_last_valid_value(qt_app):
+    window = MainWindow()
+    window.custom_speed_spin.setValue(1.7)
+    window._on_custom_speed_committed()
+
+    assert not window._apply_playback_rate(4.1)
+    assert window.player.playbackRate() == pytest.approx(1.7)
+    assert window.custom_speed_spin.value() == pytest.approx(1.7)
+    assert "0.1x" in window.status_label.text()
+    assert "4.0x" in window.status_label.text()
 
 
 @pytest.mark.parametrize(
