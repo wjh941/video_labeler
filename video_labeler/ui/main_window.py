@@ -884,7 +884,7 @@ class MainWindow(QMainWindow):
             return
         try:
             create_backup(self._project_path, self._project_snapshot())
-        except OSError as error:
+        except (OSError, ValueError) as error:
             self._set_status(f"自动备份失败：{error}")
 
     def _confirm_discard_dirty_project(self) -> bool:
@@ -955,7 +955,8 @@ class MainWindow(QMainWindow):
         )
         if not filename or not self._confirm_discard_dirty_project():
             return
-        self._load_project_path(Path(filename))
+        if not self._load_project_path(Path(filename)):
+            return
 
     def restore_project_from_backup(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -968,7 +969,8 @@ class MainWindow(QMainWindow):
         if not filename or not self._confirm_discard_dirty_project():
             return
         backup_path = Path(filename)
-        self._load_project_path(backup_path)
+        if not self._load_project_path(backup_path):
+            return
         if backup_path.parent.name == ".backups":
             project_name, separator, _timestamp = backup_path.stem.rpartition("_")
             if separator and project_name:
@@ -978,12 +980,12 @@ class MainWindow(QMainWindow):
         self._project_dirty = True
         self._set_status(f"已从备份恢复工程：{backup_path.name}")
 
-    def _load_project_path(self, path: Path) -> None:
+    def _load_project_path(self, path: Path) -> bool:
         try:
             project = load_project(path)
         except (OSError, ValueError) as error:
             self._show_error("无法打开工程", f"打开工程失败：{error}")
-            return
+            return False
 
         self._backup_timer.stop()
         self.project = project
@@ -1017,6 +1019,7 @@ class MainWindow(QMainWindow):
         else:
             self.switch_active_video(entry.id)
         self._set_status(f"已打开工程：{path.name}")
+        return True
 
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -1052,6 +1055,15 @@ class MainWindow(QMainWindow):
         active_video = self._active_project_video()
         if active_video is None:
             self.records = imported_records
+            if imported_records:
+                source_reference = Path(imported_records[0].source).expanduser()
+                if not source_reference.is_absolute():
+                    source_reference = Path(filename).parent / source_reference
+                active_video = add_or_activate_video(
+                    self.project, source_reference
+                )
+                active_video.segments = self.records
+                self._bind_active_video(active_video)
         else:
             active_video.segments[:] = imported_records
             self.records = active_video.segments

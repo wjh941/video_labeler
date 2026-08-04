@@ -332,6 +332,92 @@ def test_import_csv_replaces_active_project_segments_in_place(
     assert [record.sequence for record in active_records] == [1]
 
 
+def test_import_csv_without_active_video_creates_persisted_project_video(
+    qt_app, tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "clips.csv"
+    project_path = tmp_path / "work.labelproj"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "camera.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+    window._project_path = project_path
+    window.save_project()
+
+    restored = MainWindow()
+    assert restored._load_project_path(project_path)
+    assert len(restored.project.videos) == 1
+    assert restored.project.videos[0].segments is restored.records
+    assert restored.records == window.records
+    assert restored.project.videos[0].path.is_absolute()
+
+
+def test_restore_invalid_project_keeps_current_state_and_reports_no_success(
+    qt_app, tmp_path, monkeypatch
+):
+    invalid_path = tmp_path / "invalid.labelproj"
+    invalid_path.write_text("not-json", encoding="utf-8")
+    window = MainWindow()
+    window.set_source_path(tmp_path / "camera.mp4")
+    original_project = window.project
+    original_path = tmp_path / "work.labelproj"
+    window._project_path = original_path
+    window._project_dirty = True
+    messages = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(invalid_path), "工程")),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda _title, text: messages.append(text),
+    )
+
+    window.restore_project_from_backup()
+
+    assert window.project is original_project
+    assert window._project_path == original_path
+    assert window._project_dirty
+    assert messages == ["打开工程失败：project JSON is invalid"]
+    assert "已从备份恢复工程" not in window.status_label.text()
+
+
+def test_automatic_backup_reports_project_validation_error(qt_app, tmp_path, monkeypatch):
+    window = MainWindow()
+    window._project_path = tmp_path / "work.labelproj"
+    statuses = []
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.create_backup",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("invalid project")
+        ),
+    )
+    monkeypatch.setattr(window, "_set_status", statuses.append)
+
+    window._write_automatic_backup()
+
+    assert statuses == ["自动备份失败：invalid project"]
+
+
 def test_tag_area_no_scrollbar(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
