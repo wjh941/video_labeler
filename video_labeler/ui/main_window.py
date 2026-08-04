@@ -527,6 +527,7 @@ class MainWindow(QMainWindow):
                 self.behavior_filter_combo.findData(value)
             )
         )
+        self._set_combo_visible_item_count(self.behavior_filter_combo)
         self.polarity_filter_combo = QComboBox()
         self.polarity_filter_combo.addItem("全部正负例", None)
         for polarity in POLARITIES:
@@ -1092,6 +1093,7 @@ class MainWindow(QMainWindow):
         self._apply_table_filters()
 
     def _sort_records(self) -> None:
+        self.task_table.clearSelection()
         key_name, reverse = self.sort_combo.currentData()
         if key_name == "duration":
             self.records.sort(
@@ -1310,6 +1312,7 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        self.task_table.clearSelection()
         for index in reversed(indexes):
             del self.records[index]
         self._editing_index = None

@@ -97,6 +97,81 @@ def test_tag_area_no_scrollbar(qt_app):
     assert window.lighting_combo.maxVisibleItems() == window.lighting_combo.count()
 
 
+def test_new_window_sizes_behavior_filter_to_all_options(qt_app):
+    window = MainWindow()
+
+    assert (
+        window.behavior_filter_combo.maxVisibleItems()
+        == window.behavior_filter_combo.count()
+    )
+
+
+def test_sort_clears_selection_before_batch_delete(qt_app, monkeypatch):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=index,
+            end_seconds=index + 1,
+            output=f"clip-{index}.mp4",
+            sequence=index,
+        )
+        for index in range(1, 3)
+    ]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+
+    window.sort_combo.setCurrentIndex(1)
+
+    assert not window.task_table.selectionModel().selectedRows()
+    errors = []
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda title, text: errors.append((title, text)),
+    )
+    window._delete_selected_records()
+
+    assert [record.sequence for record in window.records] == [2, 1]
+    assert errors == [("未选择片段", "请先选择至少一个片段。")]
+
+
+def test_delete_clears_selection_before_repeat_delete(qt_app, monkeypatch):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=index,
+            end_seconds=index + 1,
+            output=f"clip-{index}.mp4",
+            sequence=index,
+        )
+        for index in range(1, 3)
+    ]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+
+    window._delete_selected_records()
+
+    assert [record.sequence for record in window.records] == [2]
+    assert not window.task_table.selectionModel().selectedRows()
+    errors = []
+    monkeypatch.setattr(
+        window,
+        "_show_error",
+        lambda title, text: errors.append((title, text)),
+    )
+    window._delete_selected_records()
+
+    assert [record.sequence for record in window.records] == [2]
+    assert errors == [("未选择片段", "请先选择至少一个片段。")]
+
+
 def test_main_window_uses_chinese_workflow_copy_and_keeps_tag_values(qt_app):
     window = MainWindow()
 
