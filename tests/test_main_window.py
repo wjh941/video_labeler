@@ -87,6 +87,49 @@ def _three_column_threshold(window: MainWindow) -> int:
     return sum(widths) + window.behavior_checks_layout.horizontalSpacing() * 2
 
 
+def _set_behavior_container_target_width(
+    qt_app, window: MainWindow, target_width: int
+) -> None:
+    horizontal_overhead = max(
+        0, window.annotation_scroll.width() - window.behavior_checks_container.width()
+    )
+    target_scroll_width = target_width + horizontal_overhead
+    window.editor_splitter.setSizes(
+        [max(1, window.editor_splitter.width() - target_scroll_width), target_scroll_width]
+    )
+    _process_behavior_reflow(qt_app, window)
+
+
+def _assert_visible_behavior_grid(window: MainWindow, expected_columns: int) -> None:
+    checks = list(window.behavior_checks.values())
+    container_origin = window.behavior_checks_container.mapTo(
+        window.annotation_scroll.viewport(), QPoint(0, 0)
+    )
+
+    assert window.behavior_columns == expected_columns
+    assert [
+        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
+        for column in range(expected_columns)
+    ] == list(BEHAVIOR_LABELS[:expected_columns])
+    assert container_origin.x() >= 0
+    assert (
+        container_origin.x() + window.behavior_checks_container.width()
+        <= window.annotation_scroll.viewport().width()
+    )
+    assert all(
+        checkbox.parentWidget() is window.behavior_checks_container
+        and checkbox.width() >= checkbox.sizeHint().width()
+        and checkbox.geometry().right()
+        < window.behavior_checks_container.width()
+        for checkbox in checks
+    )
+    assert not any(
+        checkbox.geometry().intersects(other.geometry())
+        for index, checkbox in enumerate(checks)
+        for other in checks[index + 1 :]
+    )
+
+
 def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
     window = MainWindow()
     source_path = tmp_path / "source.mp4"
@@ -580,7 +623,7 @@ def test_tag_area_no_scrollbar(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
-    qt_app.processEvents()
+    _process_behavior_reflow(qt_app, window)
 
     assert not window.behaviors_group.findChildren(QScrollArea)
     assert window.behavior_columns >= 2
@@ -598,7 +641,7 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
-    qt_app.processEvents()
+    _process_behavior_reflow(qt_app, window)
 
     assert not window.behaviors_group.findChildren(QScrollArea)
     assert window.behavior_columns >= 2
@@ -610,7 +653,7 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     )
 
     window.resize(1280, 900)
-    qt_app.processEvents()
+    _process_behavior_reflow(qt_app, window)
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
         and checkbox.geometry().right()
@@ -619,7 +662,7 @@ def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app)
     )
 
     window.resize(1120, 720)
-    qt_app.processEvents()
+    _process_behavior_reflow(qt_app, window)
     assert window.behavior_columns >= 2
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
@@ -732,41 +775,33 @@ def test_behavior_checks_choose_three_columns_at_three_column_threshold(qt_app):
     )
 
 
-def test_behavior_checks_threshold_switching_keeps_row_major_geometry_non_overlapping(
+def test_behavior_checks_splitter_reflow_preserves_two_and_three_column_grid(
     qt_app,
 ):
     window = MainWindow()
+    window.resize(1920, 900)
     window.show()
+    _process_behavior_reflow(qt_app, window)
+
     three_column_threshold = _three_column_threshold(window)
-    checks = list(window.behavior_checks.values())
+    two_column_threshold = sum(_behavior_column_widths(window, 2)) + (
+        window.behavior_checks_layout.horizontalSpacing()
+    )
 
-    for available_width, expected_columns in (
-        (three_column_threshold - 1, 2),
-        (three_column_threshold, 3),
-        (three_column_threshold - 1, 2),
-        (three_column_threshold, 3),
+    for target_width, expected_columns in (
+        (three_column_threshold - 4, 2),
+        (three_column_threshold + 4, 3),
+        (three_column_threshold - 4, 2),
+        (three_column_threshold + 4, 3),
     ):
-        window.behavior_checks_container.setFixedWidth(available_width)
-        window._reflow_behavior_checks()
-        qt_app.processEvents()
-        qt_app.processEvents()
+        _set_behavior_container_target_width(qt_app, window, target_width)
+        _assert_visible_behavior_grid(window, expected_columns)
 
-        assert window.behavior_columns == expected_columns
-        assert [
-            window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
-            for column in range(expected_columns)
-        ] == list(BEHAVIOR_LABELS[:expected_columns])
-        assert all(
-            checkbox.width() >= checkbox.sizeHint().width()
-            and checkbox.geometry().right()
-            < window.behavior_checks_container.width()
-            for checkbox in checks
-        )
-        assert not any(
-            checkbox.geometry().intersects(other.geometry())
-            for index, checkbox in enumerate(checks)
-            for other in checks[index + 1 :]
-        )
+    window.editor_splitter.setSizes([window.editor_splitter.width(), 1])
+    _process_behavior_reflow(qt_app, window)
+
+    assert window.behavior_checks_container.width() >= two_column_threshold
+    _assert_visible_behavior_grid(window, 2)
 
 
 def test_reflow_does_not_unrestrict_height_during_expand_animation(qt_app):

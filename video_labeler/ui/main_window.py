@@ -272,6 +272,7 @@ class MainWindow(QMainWindow):
         )
         self.annotation_scroll.installEventFilter(self)
         self.editor_splitter.addWidget(self.annotation_scroll)
+        self._set_annotation_minimum_width()
         self.editor_splitter.setSizes([616, 788])
 
         self.workspace_splitter.addWidget(self.editor_splitter)
@@ -553,13 +554,34 @@ class MainWindow(QMainWindow):
 
     def _behavior_layout_for_width(self, available_width: int) -> tuple[int, list[int]]:
         checks = list(self.behavior_checks.values())
-        spacing = self.behavior_checks_layout.horizontalSpacing()
         two_column_widths = self._behavior_column_widths(checks, 2)
         three_column_widths = self._behavior_column_widths(checks, 3)
-        three_column_width = sum(three_column_widths) + spacing * 2
+        three_column_width = self._behavior_grid_minimum_width(
+            three_column_widths
+        )
         if available_width >= three_column_width:
             return 3, three_column_widths
         return 2, two_column_widths
+
+    def _set_annotation_minimum_width(self) -> None:
+        """Keep the non-scrollable tag grid wide enough for two full columns."""
+        two_column_widths = self._behavior_column_widths(
+            list(self.behavior_checks.values()), 2
+        )
+        self.behavior_checks_container.setMinimumWidth(
+            self._behavior_grid_minimum_width(two_column_widths)
+        )
+        self.behavior_checks_container.updateGeometry()
+        self.behaviors_group.updateGeometry()
+        self.annotation_panel.updateGeometry()
+        self.annotation_scroll.setMinimumWidth(
+            self.annotation_panel.minimumSizeHint().width()
+            + self.annotation_scroll.frameWidth() * 2
+        )
+
+    def _behavior_grid_minimum_width(self, column_widths: list[int]) -> int:
+        spacing = self.behavior_checks_layout.horizontalSpacing()
+        return sum(column_widths) + spacing * (len(column_widths) - 1)
 
     @staticmethod
     def _behavior_column_widths(
