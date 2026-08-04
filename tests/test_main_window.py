@@ -94,8 +94,9 @@ def _set_behavior_container_target_width(
         0, window.annotation_scroll.width() - window.behavior_checks_container.width()
     )
     target_scroll_width = target_width + horizontal_overhead
+    splitter_content_width = sum(window.editor_splitter.sizes())
     window.editor_splitter.setSizes(
-        [max(1, window.editor_splitter.width() - target_scroll_width), target_scroll_width]
+        [max(1, splitter_content_width - target_scroll_width), target_scroll_width]
     )
     _process_behavior_reflow(qt_app, window)
 
@@ -790,11 +791,13 @@ def test_behavior_checks_splitter_reflow_preserves_two_and_three_column_grid(
 
     for target_width, expected_columns in (
         (three_column_threshold - 4, 2),
+        (three_column_threshold, 3),
         (three_column_threshold + 4, 3),
         (three_column_threshold - 4, 2),
         (three_column_threshold + 4, 3),
     ):
         _set_behavior_container_target_width(qt_app, window, target_width)
+        assert window.behavior_checks_container.width() == target_width
         _assert_visible_behavior_grid(window, expected_columns)
 
     window.editor_splitter.setSizes([window.editor_splitter.width(), 1])
