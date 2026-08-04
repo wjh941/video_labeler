@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QItemSelectionModel, QPoint, QSignalBlocker, Qt
 from PySide6.QtGui import QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -136,14 +137,22 @@ def test_collapsible_behavior_group(qt_app):
     assert window.behaviors_group.isCheckable()
     assert window.behaviors_group.isChecked()
     assert window.behavior_checks_container.isVisible()
+    assert window.behaviors_group.animation_duration_ms == 300
+    assert window.behaviors_group.chevron_rotation == pytest.approx(90.0)
 
     window.behaviors_group.setChecked(False)
     qt_app.processEvents()
+    assert window.behavior_checks_container.isVisible()
+    QTest.qWait(350)
     assert not window.behavior_checks_container.isVisible()
+    assert window.behaviors_group.chevron_rotation == pytest.approx(0.0)
 
     window.behaviors_group.setChecked(True)
     qt_app.processEvents()
     assert window.behavior_checks_container.isVisible()
+    QTest.qWait(350)
+    assert window.behavior_checks_container.isVisible()
+    assert window.behaviors_group.chevron_rotation == pytest.approx(90.0)
 
 
 def test_main_window_uses_semantic_style_object_names(qt_app):

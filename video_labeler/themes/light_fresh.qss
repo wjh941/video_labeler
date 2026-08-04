@@ -38,6 +38,15 @@ QGroupBox::title {
     color: #303133;
 }
 
+QGroupBox#collapsibleBehaviorGroup::indicator {
+    width: 0px;
+    height: 0px;
+}
+
+QGroupBox#collapsibleBehaviorGroup::title {
+    left: 26px;
+}
+
 QPushButton {
     min-height: 30px;
     padding: 4px 12px;

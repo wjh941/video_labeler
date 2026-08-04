@@ -2,8 +2,17 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QItemSelectionModel, QSignalBlocker, Qt, QUrl
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtCore import (
+    QEasingCurve,
+    QItemSelectionModel,
+    QParallelAnimationGroup,
+    QPropertyAnimation,
+    Property,
+    QSignalBlocker,
+    Qt,
+    QUrl,
+)
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPen, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -92,20 +101,98 @@ SHORTCUT_HELP_ROWS = (
 
 
 class CollapsibleGroupBox(QGroupBox):
+    animation_duration_ms = 300
+    _UNRESTRICTED_HEIGHT = 16777215
+
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(title, parent)
         self.setCheckable(True)
         self.setChecked(True)
         self._content: QWidget | None = None
-        self.toggled.connect(self._set_content_visible)
+        self._content_animation: QPropertyAnimation | None = None
+        self._chevron_rotation = 90.0
+        self._animation = QParallelAnimationGroup(self)
+        self._chevron_animation = QPropertyAnimation(
+            self, b"chevronRotation", self
+        )
+        self._chevron_animation.setDuration(self.animation_duration_ms)
+        self._chevron_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._animation.addAnimation(self._chevron_animation)
+        self._animation.finished.connect(self._finish_content_animation)
+        self.toggled.connect(self._animate_content)
 
     def set_content(self, content: QWidget) -> None:
         self._content = content
         content.setVisible(self.isChecked())
+        content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
+        self._content_animation = QPropertyAnimation(
+            content, b"maximumHeight", self
+        )
+        self._content_animation.setDuration(self.animation_duration_ms)
+        self._content_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._animation.insertAnimation(0, self._content_animation)
 
-    def _set_content_visible(self, expanded: bool) -> None:
-        if self._content is not None:
-            self._content.setVisible(expanded)
+    @Property(float)
+    def chevronRotation(self) -> float:
+        return self._chevron_rotation
+
+    @chevronRotation.setter
+    def chevronRotation(self, value: float) -> None:
+        self._chevron_rotation = value
+        self.update()
+
+    @property
+    def chevron_rotation(self) -> float:
+        return self._chevron_rotation
+
+    def _animate_content(self, expanded: bool) -> None:
+        if self._content is None or self._content_animation is None:
+            return
+
+        self._animation.stop()
+        if expanded:
+            self._content.setVisible(True)
+            start_height = 0
+            target_height = max(
+                self._content.sizeHint().height(),
+                self._content.minimumSizeHint().height(),
+            )
+            self._content.setMaximumHeight(start_height)
+        else:
+            start_height = max(
+                self._content.height(),
+                self._content.sizeHint().height(),
+            )
+            target_height = 0
+
+        self._content_animation.setStartValue(start_height)
+        self._content_animation.setEndValue(target_height)
+        self._chevron_animation.setStartValue(self._chevron_rotation)
+        self._chevron_animation.setEndValue(90.0 if expanded else 0.0)
+        self._animation.start()
+
+    def _finish_content_animation(self) -> None:
+        if self._content is None:
+            return
+        if self.isChecked():
+            self._content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
+            self._content.updateGeometry()
+        else:
+            self._content.setVisible(False)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.palette().color(QPalette.ColorRole.Highlight))
+        pen.setWidthF(1.8)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.translate(15, 11)
+        painter.rotate(self._chevron_rotation)
+        painter.drawLine(-3, -5, 3, 0)
+        painter.drawLine(3, 0, -3, 5)
 
 
 class MainWindow(QMainWindow):
