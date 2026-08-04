@@ -69,6 +69,56 @@ QGroupBox::title {
     color: #303133;
 }
 
+QGroupBox#toolbarCard,
+QGroupBox#videoCard,
+QGroupBox#annotationCard,
+QGroupBox#taskCard {
+    background: #FFFFFF;
+    border: 1px solid #E4E7ED;
+    border-radius: 10px;
+    margin-top: 12px;
+    padding: 14px;
+}
+
+QGroupBox#toolbarCard::title,
+QGroupBox#videoCard::title,
+QGroupBox#annotationCard::title,
+QGroupBox#taskCard::title {
+    left: 14px;
+    color: #303133;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QWidget#toolbarActionGroup {
+    background: transparent;
+}
+
+QFrame#toolbarSeparator {
+    min-width: 1px;
+    max-width: 1px;
+    background: #EBEEF5;
+    margin: 4px 5px;
+}
+
+QGroupBox#inlineExportOptions {
+    background: #F8FAFC;
+    border: 1px solid #EBEEF5;
+    border-radius: 7px;
+    margin-top: 8px;
+    padding: 8px;
+}
+
+QScrollArea#mainContentScroll {
+    background: #F5F7FA;
+    border: 0;
+    border-radius: 0;
+}
+
+QWidget#workspaceContent {
+    background: #F5F7FA;
+}
+
 QGroupBox#collapsibleBehaviorGroup::indicator {
     width: 0px;
     height: 0px;
@@ -156,6 +206,17 @@ QPushButton#dangerButton:hover {
     color: #F56C6C;
 }
 
+QPushButton#secondaryButton {
+    background: #F5F7FA;
+    border-color: #C6E2FF;
+    color: #409EFF;
+}
+
+QPushButton#secondaryButton:hover {
+    background: #ECF5FF;
+    border-color: #409EFF;
+}
+
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     min-height: 28px;
     padding: 2px 8px;
@@ -174,6 +235,10 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
 QLineEdit:read-only {
     background: #F5F7FA;
     color: #909399;
+}
+
+QDoubleSpinBox#customPlaybackRateSpin {
+    min-width: 86px;
 }
 
 QComboBox::drop-down {
@@ -350,7 +415,7 @@ QGraphicsView#videoSurface::viewport {
 }
 
 QWidget#videoControlsPanel {
-    background: #FFFFFF;
-    border: 1px solid #DCDFE6;
-    border-radius: 6px;
+    background: #F8FBFF;
+    border: 1px solid #D9ECFF;
+    border-radius: 8px;
 }

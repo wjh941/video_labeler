@@ -1939,6 +1939,24 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
 
 
+def test_card_workspace_uses_semantic_cards_without_overlapping_video_controls(
+    qt_app,
+):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.project_header.objectName() == "toolbarCard"
+    assert window.video_panel.objectName() == "videoCard"
+    assert window.annotation_panel.objectName() == "annotationCard"
+    assert window.task_panel.objectName() == "taskCard"
+    assert window.video_controls_panel.geometry().top() > (
+        window.video_widget.geometry().bottom()
+    )
+    assert window.video_panel.graphicsEffect() is not None
+
+
 def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
     window = MainWindow()
     window.records = [_clip_record("source.mp4", 1)]

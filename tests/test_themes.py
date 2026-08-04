@@ -40,3 +40,16 @@ def test_light_theme_keeps_file_dialog_browser_views_unforced():
     assert "background: #FFFFFF;" in stylesheet
     assert "color: #303133;" in stylesheet
     assert "selection-background-color: #ECF5FF;" in stylesheet
+
+
+def test_light_theme_contains_card_workspace_selectors():
+    stylesheet = load_light_fresh_theme()
+
+    for selector in (
+        "QGroupBox#toolbarCard",
+        "QGroupBox#videoCard",
+        "QGroupBox#annotationCard",
+        "QGroupBox#taskCard",
+        "QWidget#videoControlsPanel",
+    ):
+        assert selector in stylesheet

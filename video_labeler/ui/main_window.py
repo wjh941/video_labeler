@@ -36,6 +36,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGraphicsDropShadowEffect,
     QGraphicsScene,
     QGraphicsView,
     QGridLayout,
@@ -277,18 +279,21 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.MinimumExpanding,
         )
         content_layout = QVBoxLayout(self.workspace_content)
-        content_layout.setContentsMargins(16, 14, 16, 14)
-        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(20, 18, 20, 18)
+        content_layout.setSpacing(16)
 
-        content_layout.addWidget(self._build_project_header())
+        self.project_header = self._build_project_header()
+        content_layout.addWidget(self.project_header)
 
         self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
         self.workspace_splitter.setChildrenCollapsible(False)
         self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.editor_splitter.setChildrenCollapsible(False)
-        self.editor_splitter.addWidget(self._build_video_panel())
+        self.video_panel = self._build_video_panel()
+        self.editor_splitter.addWidget(self.video_panel)
 
         self.annotation_panel = self._build_clip_editor()
+        self.annotation_panel.setObjectName("annotationCard")
         self.annotation_scroll = QScrollArea()
         self.annotation_scroll.setWidget(self.annotation_panel)
         self.annotation_scroll.setWidgetResizable(True)
@@ -306,6 +311,7 @@ class MainWindow(QMainWindow):
 
         self.workspace_splitter.addWidget(self.editor_splitter)
         self.task_panel = self._build_task_table()
+        self.task_panel.setObjectName("taskCard")
         self.task_panel.setMinimumHeight(320)
         self.workspace_splitter.addWidget(self.task_panel)
         self.workspace_splitter.setMinimumHeight(892)
@@ -315,6 +321,7 @@ class MainWindow(QMainWindow):
 
         self.task_table_dialog = QDialog(self)
         self.task_table_dialog.setWindowTitle("片段任务")
+        self.task_table_dialog.setObjectName("taskTableDialog")
         self.task_table_dialog.setModal(False)
         self.task_table_dialog.setMinimumSize(900, 500)
         self.task_table_dialog.setLayout(QVBoxLayout())
@@ -323,16 +330,31 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.workspace_splitter, stretch=1)
         content_layout.addLayout(self._build_export_status())
 
+        for card in (
+            self.project_header,
+            self.video_panel,
+            self.annotation_panel,
+            self.task_panel,
+        ):
+            self._apply_card_shadow(card)
+
         self.main_content_scroll.setWidget(self.workspace_content)
         root_layout.addWidget(self.main_content_scroll)
         self.setCentralWidget(root)
 
+    def _apply_card_shadow(self, widget: QWidget) -> None:
+        effect = QGraphicsDropShadowEffect(widget)
+        effect.setBlurRadius(18)
+        effect.setOffset(0, 3)
+        effect.setColor(QColor(31, 45, 61, 28))
+        widget.setGraphicsEffect(effect)
+
     def _build_project_header(self) -> QGroupBox:
         group = QGroupBox("项目设置")
-        layout = QGridLayout(group)
-        layout.setHorizontalSpacing(8)
-        layout.setVerticalSpacing(6)
-        layout.setColumnStretch(4, 1)
+        group.setObjectName("toolbarCard")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
 
         self.open_video_button = QPushButton("导入视频")
         self.import_csv_button = QPushButton("导入 CSV")
@@ -370,20 +392,57 @@ class MainWindow(QMainWindow):
         self.workers_spin.setValue(0)
         self.workers_spin.setSpecialValueText("自动")
 
-        layout.addWidget(self.open_video_button, 0, 0)
-        layout.addWidget(self.import_csv_button, 0, 1)
-        layout.addWidget(self.save_csv_button, 0, 2)
-        layout.addWidget(self.output_folder_button, 0, 3)
-        layout.addWidget(self.output_folder_label, 0, 4)
-        layout.addWidget(self.export_button, 0, 5)
-        layout.addWidget(self.shortcut_help_button, 0, 6)
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
 
-        layout.addWidget(QLabel("日期"), 1, 0)
-        layout.addWidget(self.date_edit, 1, 1)
-        layout.addWidget(QLabel("摄像头"), 1, 2)
-        layout.addWidget(self.camera_edit, 1, 3)
-        layout.addWidget(QLabel("视角"), 1, 4)
-        layout.addWidget(self.view_combo, 1, 5)
+        project_actions = QWidget()
+        project_actions.setObjectName("toolbarActionGroup")
+        project_actions_layout = QHBoxLayout(project_actions)
+        project_actions_layout.setContentsMargins(0, 0, 0, 0)
+        project_actions_layout.setSpacing(6)
+        project_actions_layout.addWidget(self.open_video_button)
+        project_actions_layout.addWidget(self.import_csv_button)
+        project_actions_layout.addWidget(self.save_csv_button)
+        action_layout.addWidget(project_actions)
+
+        import_export_separator = QFrame()
+        import_export_separator.setObjectName("toolbarSeparator")
+        import_export_separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(import_export_separator)
+
+        export_actions = QWidget()
+        export_actions.setObjectName("toolbarActionGroup")
+        export_actions_layout = QHBoxLayout(export_actions)
+        export_actions_layout.setContentsMargins(0, 0, 0, 0)
+        export_actions_layout.setSpacing(6)
+        export_actions_layout.addWidget(self.output_folder_button)
+        export_actions_layout.addWidget(self.output_folder_label, stretch=1)
+        export_actions_layout.addWidget(self.export_button)
+        action_layout.addWidget(export_actions, stretch=1)
+
+        help_separator = QFrame()
+        help_separator.setObjectName("toolbarSeparator")
+        help_separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(help_separator)
+
+        assistance_actions = QWidget()
+        assistance_actions.setObjectName("toolbarActionGroup")
+        assistance_actions_layout = QHBoxLayout(assistance_actions)
+        assistance_actions_layout.setContentsMargins(0, 0, 0, 0)
+        assistance_actions_layout.addWidget(self.shortcut_help_button)
+        action_layout.addWidget(assistance_actions)
+        layout.addLayout(action_layout)
+
+        metadata_layout = QHBoxLayout()
+        metadata_layout.setSpacing(8)
+        metadata_layout.addWidget(QLabel("日期"))
+        metadata_layout.addWidget(self.date_edit)
+        metadata_layout.addWidget(QLabel("摄像头"))
+        metadata_layout.addWidget(self.camera_edit)
+        metadata_layout.addWidget(QLabel("视角"))
+        metadata_layout.addWidget(self.view_combo)
+        metadata_layout.addStretch(1)
+        layout.addLayout(metadata_layout)
 
         self.advanced_export_group = QGroupBox("导出设置")
         self.advanced_export_group.setCheckable(True)
@@ -402,7 +461,8 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(self.workers_spin)
         advanced_layout.addWidget(self.advanced_export_content)
         self.advanced_export_content.setVisible(False)
-        layout.addWidget(self.advanced_export_group, 2, 0, 1, 6)
+        self.advanced_export_group.setObjectName("inlineExportOptions")
+        layout.addWidget(self.advanced_export_group)
         return group
 
     def _build_project_menu(self) -> None:
@@ -419,9 +479,10 @@ class MainWindow(QMainWindow):
 
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
+        group.setObjectName("videoCard")
         layout = QVBoxLayout(group)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
 
         self.video_widget = QGraphicsView()
         self.video_widget.setMinimumHeight(420)
@@ -489,6 +550,7 @@ class MainWindow(QMainWindow):
         self.custom_speed_spin.setSingleStep(0.1)
         self.custom_speed_spin.setKeyboardTracking(False)
         self.custom_speed_spin.setSuffix("x")
+        self.custom_speed_spin.setObjectName("customPlaybackRateSpin")
         self.custom_speed_spin.setValue(self._last_playback_rate)
 
         controls.addWidget(self.play_button)
@@ -507,8 +569,8 @@ class MainWindow(QMainWindow):
     def _build_clip_editor(self) -> QGroupBox:
         group = QGroupBox("片段标注")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(14)
 
         source_layout = QHBoxLayout()
         self.source_label = QLabel("未选择视频")
@@ -728,6 +790,8 @@ class MainWindow(QMainWindow):
     def _build_task_table(self) -> QGroupBox:
         group = QGroupBox("片段任务")
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
 
         self.task_table = QTableWidget(0, len(TABLE_COLUMNS))
         self.task_table.setHorizontalHeaderLabels(TABLE_COLUMNS)
