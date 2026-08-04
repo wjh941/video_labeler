@@ -408,6 +408,71 @@ def test_import_csv_without_active_video_partitions_multiple_sources(
     assert [record.source for record in window.records] == ["second.mp4"]
 
 
+def test_import_csv_keeps_same_basename_videos_in_different_directories_isolated(
+    qt_app, tmp_path, monkeypatch
+):
+    first_path = tmp_path / "a" / "cam.mp4"
+    second_path = tmp_path / "b" / "cam.mp4"
+    csv_path = tmp_path / "clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            f"{second_path},00:00:03.000,00:00:04.000,"
+            "20260729-cam02_indoor-fall-neg-daytime-002.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    window.set_source_path(first_path)
+    window.records.append(_clip_record(first_path.name, 1))
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert len(window.project.videos) == 2
+    assert window.project.videos[0].path == first_path.resolve()
+    assert [record.sequence for record in window.project.videos[0].segments] == [1]
+    assert window.project.videos[1].path == second_path.resolve()
+    assert [record.sequence for record in window.records] == [2]
+
+
+def test_import_csv_merges_relative_and_absolute_source_aliases(
+    qt_app, tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "clips.csv"
+    video_path = (tmp_path / "same.mp4").resolve()
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "same.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+            f"{video_path},00:00:03.000,00:00:04.000,"
+            "20260729-cam02_indoor-fall-neg-daytime-002.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert len(window.project.videos) == 1
+    assert window.project.videos[0].path == video_path
+    assert [record.sequence for record in window.records] == [1, 2]
+    assert [record.source for record in window.records] == [
+        "same.mp4",
+        str(video_path),
+    ]
+
+
 def test_restore_invalid_project_keeps_current_state_and_reports_no_success(
     qt_app, tmp_path, monkeypatch
 ):

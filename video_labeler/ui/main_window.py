@@ -1022,26 +1022,14 @@ class MainWindow(QMainWindow):
         return True
 
     @staticmethod
-    def _resolve_import_source_path(source: str, csv_path: Path) -> Path:
+    def _normalized_import_source(
+        source: str | Path, csv_path: Path
+    ) -> tuple[Path, str]:
         source_path = Path(source).expanduser()
         if not source_path.is_absolute():
             source_path = csv_path.parent / source_path
-        return source_path.resolve(strict=False)
-
-    def _project_video_for_import_source(
-        self, source: str, csv_path: Path
-    ) -> ProjectVideo | None:
-        source_path = self._resolve_import_source_path(source, csv_path)
-        source_key = str(source_path).casefold()
-        source_name = source_path.name.casefold()
-        for video in self.project.videos:
-            video_path = video.path.expanduser().resolve(strict=False)
-            if (
-                str(video_path).casefold() == source_key
-                or video_path.name.casefold() == source_name
-            ):
-                return video
-        return None
+        normalized_path = source_path.resolve(strict=False)
+        return normalized_path, str(normalized_path).casefold()
 
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -1076,27 +1064,40 @@ class MainWindow(QMainWindow):
 
         csv_path = Path(filename)
         active_video = self._active_project_video()
-        source_groups: dict[str, list[ClipRecord]] = {}
+        source_groups: dict[str, tuple[Path, list[ClipRecord]]] = {}
         for record in imported_records:
-            source_groups.setdefault(record.source, []).append(record)
+            source_path, source_key = self._normalized_import_source(
+                record.source, csv_path
+            )
+            if source_key not in source_groups:
+                source_groups[source_key] = (source_path, [])
+            source_groups[source_key][1].append(record)
 
-        imported_videos: list[ProjectVideo] = []
-        for source, records in source_groups.items():
-            video = self._project_video_for_import_source(source, csv_path)
+        project_videos = {
+            self._normalized_import_source(video.path, csv_path)[1]: video
+            for video in self.project.videos
+        }
+        imported_videos: dict[str, ProjectVideo] = {}
+        for source_key, (source_path, records) in source_groups.items():
+            video = project_videos.get(source_key)
             if video is None:
                 video = add_or_activate_video(
                     self.project,
-                    self._resolve_import_source_path(source, csv_path),
+                    source_path,
                 )
             video.segments[:] = records
-            imported_videos.append(video)
+            project_videos[source_key] = video
+            imported_videos[source_key] = video
 
         if imported_videos:
-            selected_video = (
-                active_video
-                if active_video in imported_videos
-                else imported_videos[0]
+            active_key = (
+                self._normalized_import_source(active_video.path, csv_path)[1]
+                if active_video is not None
+                else None
             )
+            selected_video = imported_videos.get(active_key)
+            if selected_video is None:
+                selected_video = next(iter(imported_videos.values()))
             self._bind_active_video(selected_video)
         elif active_video is not None:
             active_video.segments.clear()
