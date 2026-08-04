@@ -312,6 +312,14 @@ class MainWindow(QMainWindow):
         self.workspace_splitter.setSizes([560, 320])
         self.workspace_splitter.setStretchFactor(0, 3)
         self.workspace_splitter.setStretchFactor(1, 2)
+
+        self.task_table_dialog = QDialog(self)
+        self.task_table_dialog.setWindowTitle("片段任务")
+        self.task_table_dialog.setModal(False)
+        self.task_table_dialog.setMinimumSize(900, 500)
+        self.task_table_dialog.setLayout(QVBoxLayout())
+        self.task_table_dialog.finished.connect(self._restore_task_panel)
+
         content_layout.addWidget(self.workspace_splitter, stretch=1)
         content_layout.addLayout(self._build_export_status())
 
@@ -778,9 +786,38 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.sort_combo)
         toolbar.addWidget(self.clear_filters_button)
         toolbar.addStretch(1)
+        self.detach_table_button = QPushButton("弹出表格")
+        self.detach_table_button.setObjectName("secondaryButton")
+        toolbar.addWidget(self.detach_table_button)
         layout.addLayout(toolbar)
         layout.addWidget(self.task_table)
         return group
+
+    def _show_task_table_dialog(self) -> None:
+        if self.task_panel.parentWidget() is self.task_table_dialog:
+            self.task_table_dialog.raise_()
+            self.task_table_dialog.activateWindow()
+            return
+
+        self.task_panel.setParent(None)
+        dialog_layout = self.task_table_dialog.layout()
+        assert dialog_layout is not None
+        dialog_layout.addWidget(self.task_panel)
+        self.task_table_dialog.show()
+        self.task_table_dialog.raise_()
+        self.task_table_dialog.activateWindow()
+
+    def _restore_task_panel(self, *_args: object) -> None:
+        if self.task_panel.parentWidget() is self.workspace_splitter:
+            return
+
+        dialog_layout = self.task_table_dialog.layout()
+        if dialog_layout is not None:
+            dialog_layout.removeWidget(self.task_panel)
+        self.task_panel.setParent(None)
+        self.workspace_splitter.insertWidget(1, self.task_panel)
+        self.workspace_splitter.setSizes([560, 320])
+        self.task_panel.show()
 
     def _build_export_status(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -944,6 +981,7 @@ class MainWindow(QMainWindow):
         self.clear_button.clicked.connect(self.clear_editor)
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
+        self.detach_table_button.clicked.connect(self._show_task_table_dialog)
         self.behavior_filter_combo.currentIndexChanged.connect(
             self._apply_table_filters
         )

@@ -1939,6 +1939,48 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
 
 
+def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
+    window = MainWindow()
+    window.records = [_clip_record("source.mp4", 1)]
+    window._refresh_table()
+
+    assert window.workspace_splitter.indexOf(window.task_panel) == 1
+    assert window.task_panel.parentWidget() is window.workspace_splitter
+
+    window._show_task_table_dialog()
+    qt_app.processEvents()
+
+    assert window.task_table_dialog.isVisible()
+    assert window.task_panel.parentWidget() is window.task_table_dialog
+    assert window.task_table_dialog.findChild(QTableWidget) is window.task_table
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window._editing_index == 0
+
+    window.task_table_dialog.close()
+    qt_app.processEvents()
+
+    assert window.workspace_splitter.indexOf(window.task_panel) == 1
+    assert window.task_panel.parentWidget() is window.workspace_splitter
+    assert window.task_table.currentRow() == 0
+
+
+def test_narrow_window_keeps_embedded_table_until_user_detaches_it(qt_app):
+    window = MainWindow()
+    window.resize(1120, 720)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.main_content_scroll.verticalScrollBar().maximum() > 0
+    assert window.task_panel.parentWidget() is window.workspace_splitter
+
+    window.detach_table_button.click()
+
+    assert window.task_table_dialog.isVisible()
+
+
 def test_video_first_workspace_scrolls_instead_of_compressing_preview(qt_app):
     window = MainWindow()
     window.resize(1280, 720)
