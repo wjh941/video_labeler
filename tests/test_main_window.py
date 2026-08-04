@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QFileDialog,
+    QGraphicsView,
     QGroupBox,
     QInputDialog,
     QMessageBox,
@@ -1877,6 +1878,50 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.workspace_splitter.orientation() == Qt.Orientation.Vertical
     assert isinstance(window.editor_splitter, QSplitter)
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
+
+
+def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    preview = window.video_widget.geometry()
+    timeline = window.timeline_slider.geometry()
+    controls = (
+        window.play_button,
+        window.seek_back_button,
+        window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
+        window.speed_combo,
+    )
+
+    assert window.video_widget.minimumHeight() >= 300
+    assert preview.bottom() + 14 < timeline.top()
+    assert all(
+        not preview.intersects(control.geometry())
+        and timeline.bottom() + 10 < control.geometry().top()
+        for control in controls
+    )
+
+
+def test_video_preview_uses_graphics_surface_that_stays_inside_its_viewport(
+    qt_app,
+):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert isinstance(window.video_widget, QGraphicsView)
+    assert window.player.videoOutput() is window.video_item
+    assert window.video_item.size().width() == pytest.approx(
+        window.video_widget.viewport().width()
+    )
+    assert window.video_item.size().height() == pytest.approx(
+        window.video_widget.viewport().height()
+    )
 
 
 def test_annotation_controls_are_wrapped_in_a_scroll_area(qt_app):

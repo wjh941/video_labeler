@@ -35,3 +35,8 @@ def test_light_theme_keeps_file_dialog_browser_views_unforced():
     assert "QFileDialog QLineEdit" in stylesheet
     assert "QFileDialog QPushButton" in stylesheet
     assert "QFileDialog QComboBox" in stylesheet
+    assert "QFileDialog QAbstractItemView" in stylesheet
+    assert "QFileDialog QAbstractScrollArea::viewport" in stylesheet
+    assert "background: #FFFFFF;" in stylesheet
+    assert "color: #303133;" in stylesheet
+    assert "selection-background-color: #ECF5FF;" in stylesheet

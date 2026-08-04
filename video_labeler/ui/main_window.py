@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Property,
     QSignalBlocker,
+    QSizeF,
     QTimer,
     Qt,
     QUrl,
@@ -25,7 +26,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -35,6 +36,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGraphicsScene,
+    QGraphicsView,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -380,18 +383,38 @@ class MainWindow(QMainWindow):
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumHeight(240)
+        self.video_widget = QGraphicsView()
+        self.video_widget.setMinimumHeight(300)
+        self.video_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.video_widget.setObjectName("videoSurface")
+        self.video_widget.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.video_widget.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.video_widget.setInteractive(False)
+        self.video_scene = QGraphicsScene(self.video_widget)
+        self.video_scene.setBackgroundBrush(QColor("#1F2937"))
+        self.video_item = QGraphicsVideoItem()
+        self.video_item.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self.video_scene.addItem(self.video_item)
+        self.video_widget.setScene(self.video_scene)
+        self.video_viewport = self.video_widget.viewport()
+        self.video_viewport.installEventFilter(self)
         layout.addWidget(self.video_widget, stretch=1)
+        layout.addSpacing(6)
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
-        self.player.setVideoOutput(self.video_widget)
+        self.player.setVideoOutput(self.video_item)
 
         position_layout = QHBoxLayout()
         self.position_label = QLabel("00:00:00.000")
@@ -403,6 +426,7 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
         layout.addLayout(position_layout)
+        layout.addSpacing(4)
 
         controls = QHBoxLayout()
         self.play_button = QPushButton("播放")
@@ -630,6 +654,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, "behavior_checks_layout"):
             self._schedule_behavior_reflow()
 
+    def _resize_video_item(self) -> None:
+        if not hasattr(self, "video_viewport"):
+            return
+        size = self.video_viewport.size()
+        self.video_scene.setSceneRect(0, 0, size.width(), size.height())
+        self.video_item.setSize(QSizeF(size))
+
     def eventFilter(self, watched, event) -> bool:
         if event.type() != QEvent.Type.Resize:
             return super().eventFilter(watched, event)
@@ -638,6 +669,8 @@ class MainWindow(QMainWindow):
             self._schedule_behavior_reflow()
         elif watched is getattr(self, "behavior_checks_container", None):
             self._schedule_behavior_reflow()
+        elif watched is getattr(self, "video_viewport", None):
+            self._resize_video_item()
         return super().eventFilter(watched, event)
 
     def _build_task_table(self) -> QGroupBox:

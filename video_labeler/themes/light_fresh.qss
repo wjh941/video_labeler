@@ -10,6 +10,30 @@ QFileDialog QComboBox {
     color: #303133;
 }
 
+QFileDialog QAbstractScrollArea,
+QFileDialog QAbstractScrollArea::viewport,
+QFileDialog QAbstractItemView {
+    background: #FFFFFF;
+    color: #303133;
+}
+
+QFileDialog QAbstractItemView {
+    border: 1px solid #DCDFE6;
+    outline: 0;
+    selection-background-color: #ECF5FF;
+    selection-color: #303133;
+}
+
+QFileDialog QAbstractItemView::item {
+    color: #303133;
+    padding: 3px 6px;
+}
+
+QFileDialog QAbstractItemView::item:selected {
+    background: #ECF5FF;
+    color: #303133;
+}
+
 QWidget {
     color: #303133;
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
@@ -318,7 +342,8 @@ QLabel#mutedLabel {
     color: #909399;
 }
 
-QWidget#videoSurface {
+QGraphicsView#videoSurface,
+QGraphicsView#videoSurface::viewport {
     background: #1F2937;
     border: 1px solid #DCDFE6;
     border-radius: 6px;
