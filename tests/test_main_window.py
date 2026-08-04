@@ -146,6 +146,61 @@ def test_collapsible_behavior_group(qt_app):
     assert window.behavior_checks_container.isVisible()
 
 
+def test_main_window_uses_semantic_style_object_names(qt_app):
+    window = MainWindow()
+
+    assert window.output_folder_label.objectName() == "mutedLabel"
+    assert window.source_label.objectName() == "mutedLabel"
+    assert window.video_widget.objectName() == "videoSurface"
+    assert window.behaviors_group.objectName() == "collapsibleBehaviorGroup"
+
+
+def test_file_dialogs_request_non_native_windows(qt_app, monkeypatch):
+    window = MainWindow()
+    dialog_options = []
+
+    def open_file_name(*_args, **kwargs):
+        dialog_options.append(kwargs.get("options"))
+        return "", ""
+
+    def save_file_name(*_args, **kwargs):
+        dialog_options.append(kwargs.get("options"))
+        return "", ""
+
+    def existing_directory(*_args, **kwargs):
+        dialog_options.append(kwargs.get("options"))
+        return ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(open_file_name))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(save_file_name))
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", staticmethod(existing_directory)
+    )
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="20260729-cam02_indoor-dog_out-pos-daytime-001.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        )
+    ]
+
+    window.open_video()
+    window.import_csv()
+    window.save_csv()
+    window.select_output_folder()
+
+    assert len(dialog_options) == 4
+    assert all(
+        option is not None and option & QFileDialog.Option.DontUseNativeDialog
+        for option in dialog_options
+    )
+
+
 def test_tag_area_no_scrollbar(qt_app):
     window = MainWindow()
     window.resize(1440, 900)

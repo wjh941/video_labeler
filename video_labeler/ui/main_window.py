@@ -129,8 +129,8 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget(self)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(10, 10, 10, 10)
-        root_layout.setSpacing(8)
+        root_layout.setContentsMargins(16, 14, 16, 14)
+        root_layout.setSpacing(12)
 
         root_layout.addWidget(self._build_project_header())
 
@@ -162,109 +162,6 @@ class MainWindow(QMainWindow):
         root_layout.addLayout(self._build_export_status())
 
         self.setCentralWidget(root)
-        self.setStyleSheet(
-            """
-            QMainWindow, QMessageBox { background: #111827; color: #f1f5f9; }
-            QWidget { color: #f1f5f9; }
-            QGroupBox {
-                background: #18212d;
-                border: 1px solid #334155;
-                border-radius: 5px;
-                margin-top: 8px;
-                font-weight: 600;
-                padding: 7px;
-                color: #f1f5f9;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 9px;
-                padding: 0 4px;
-                color: #dce5ef;
-            }
-            QPushButton {
-                min-height: 28px;
-                padding: 4px 10px;
-                background: #253244;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                color: #f1f5f9;
-            }
-            QPushButton:hover { background: #334155; border-color: #60a5fa; }
-            QPushButton:focus { border-color: #60a5fa; }
-            QPushButton:pressed { background: #1e293b; }
-            QPushButton:disabled { background: #1f2937; color: #64748b; border-color: #334155; }
-            QPushButton#primaryButton { background: #2563eb; border-color: #3b82f6; color: #ffffff; }
-            QPushButton#primaryButton:hover { background: #1d4ed8; }
-            QPushButton#addClipButton { background: #0f9f8c; border-color: #2dd4bf; color: #ffffff; }
-            QPushButton#addClipButton:hover { background: #0f8a7a; }
-            QPushButton#dangerButton { background: #512033; border-color: #dc4c64; color: #fecdd3; }
-            QPushButton#dangerButton:hover { background: #70243b; }
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-                min-height: 25px;
-                padding: 1px 6px;
-                background: #101923;
-                color: #f1f5f9;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                selection-background-color: #2563eb;
-            }
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-                border: 1px solid #60a5fa;
-            }
-            QComboBox QAbstractItemView {
-                background: #18212d;
-                color: #f1f5f9;
-                border: 1px solid #475569;
-                selection-background-color: #1d4f7a;
-            }
-            QCheckBox { color: #dce5ef; spacing: 6px; }
-            QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-                background: #101923;
-                border: 1px solid #64748b;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:checked {
-                background: #2563eb;
-                border-color: #60a5fa;
-            }
-            QScrollArea { background: #18212d; border: 1px solid #334155; border-radius: 5px; }
-            QScrollBar:vertical { background: #111827; width: 11px; margin: 2px; }
-            QScrollBar::handle:vertical { background: #475569; min-height: 28px; border-radius: 4px; }
-            QScrollBar::handle:vertical:hover { background: #64748b; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QTableWidget {
-                background: #101923;
-                color: #f1f5f9;
-                gridline-color: #334155;
-                selection-background-color: #1d4f7a;
-                selection-color: #ffffff;
-            }
-            QTableWidget::item { padding: 2px 5px; }
-            QTableWidget::item:selected { background: #1d4f7a; color: #ffffff; }
-            QHeaderView::section {
-                background: #253244;
-                color: #dce5ef;
-                border: 0;
-                border-right: 1px solid #475569;
-                border-bottom: 1px solid #475569;
-                padding: 4px;
-                font-weight: 600;
-            }
-            QSlider::groove:horizontal { background: #334155; height: 5px; border-radius: 2px; }
-            QSlider::sub-page:horizontal { background: #2563eb; border-radius: 2px; }
-            QSlider::handle:horizontal { background: #dce5ef; width: 12px; margin: -4px 0; border-radius: 6px; }
-            QProgressBar {
-                background: #101923;
-                border: 1px solid #475569;
-                border-radius: 4px;
-                color: #f1f5f9;
-                text-align: center;
-            }
-            QProgressBar::chunk { background: #0f9f8c; border-radius: 3px; }
-            """
-        )
 
     def _build_project_header(self) -> QGroupBox:
         group = QGroupBox("项目设置")
@@ -284,7 +181,7 @@ class MainWindow(QMainWindow):
         self.output_folder_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        self.output_folder_label.setStyleSheet("color: #a8b3c2;")
+        self.output_folder_label.setObjectName("mutedLabel")
 
         self.date_edit = QLineEdit()
         self.date_edit.setPlaceholderText("YYYYMMDD")
@@ -347,12 +244,12 @@ class MainWindow(QMainWindow):
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(7)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         self.video_widget = QVideoWidget()
         self.video_widget.setMinimumHeight(240)
-        self.video_widget.setStyleSheet("background: #111827;")
+        self.video_widget.setObjectName("videoSurface")
         layout.addWidget(self.video_widget, stretch=1)
 
         self.player = QMediaPlayer(self)
@@ -398,12 +295,12 @@ class MainWindow(QMainWindow):
     def _build_clip_editor(self) -> QGroupBox:
         group = QGroupBox("片段标注")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(7)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         self.source_label = QLabel("未选择视频")
         self.source_label.setWordWrap(True)
-        self.source_label.setStyleSheet("color: #a8b3c2;")
+        self.source_label.setObjectName("mutedLabel")
         layout.addWidget(self.source_label)
 
         time_form = QFormLayout()
@@ -430,6 +327,7 @@ class MainWindow(QMainWindow):
 
         self.behavior_checks: dict[str, QCheckBox] = {}
         self.behaviors_group = CollapsibleGroupBox("行为标签")
+        self.behaviors_group.setObjectName("collapsibleBehaviorGroup")
         self.behavior_checks_container = QWidget()
         self.behavior_checks_layout = QGridLayout(self.behavior_checks_container)
         self.behavior_checks_layout.setContentsMargins(0, 0, 0, 0)
@@ -780,6 +678,7 @@ class MainWindow(QMainWindow):
             "导入视频",
             "",
             "视频文件 (*.mp4 *.avi *.mkv *.mov *.m4v);;所有文件 (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not filename:
             return
@@ -790,7 +689,11 @@ class MainWindow(QMainWindow):
 
     def import_csv(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
-            self, "导入片段 CSV", "", "CSV 文件 (*.csv)"
+            self,
+            "导入片段 CSV",
+            "",
+            "CSV 文件 (*.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not filename:
             return
@@ -848,6 +751,7 @@ class MainWindow(QMainWindow):
             "保存标注 CSV",
             default_name,
             "CSV 文件 (*.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
         )
         if not filename:
             return
@@ -860,7 +764,13 @@ class MainWindow(QMainWindow):
 
     def select_output_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(
-            self, "选择输出文件夹", str(self.output_dir or Path.home())
+            self,
+            "选择输出文件夹",
+            str(self.output_dir or Path.home()),
+            options=(
+                QFileDialog.Option.ShowDirsOnly
+                | QFileDialog.Option.DontUseNativeDialog
+            ),
         )
         if not directory:
             return
