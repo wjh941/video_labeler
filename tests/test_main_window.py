@@ -210,6 +210,128 @@ def test_file_dialogs_request_non_native_windows(qt_app, monkeypatch):
     )
 
 
+def _clip_record(source: str, sequence: int) -> ClipRecord:
+    return ClipRecord(
+        source=source,
+        start_seconds=float(sequence),
+        end_seconds=float(sequence + 1),
+        output=(
+            f"20260729-cam02_indoor-dog_out-pos-daytime-{sequence:03d}.mp4"
+        ),
+        behaviors=("dog_out",),
+        polarity="pos",
+        lighting="daytime",
+        sequence=sequence,
+    )
+
+
+def test_switching_project_video_rebinds_records_without_cross_video_leakage(
+    qt_app, tmp_path
+):
+    window = MainWindow()
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+
+    window.set_source_path(first)
+    window.records.append(_clip_record(first.name, 1))
+    window.set_source_path(second)
+    window.records.append(_clip_record(second.name, 2))
+    window.switch_active_video(window.project.videos[0].id)
+
+    assert window.records[0].source == first.name
+    assert len(window.records) == 1
+    assert len(window.project.videos[1].segments) == 1
+    assert window.project_video_combo.currentData() == window.project.videos[0].id
+
+
+def test_project_save_open_and_restore_backup_keep_active_video_segments(
+    qt_app, tmp_path
+):
+    project_path = tmp_path / "work.labelproj"
+    window = MainWindow()
+    window.set_source_path(tmp_path / "camera.mp4")
+    window.records.append(_clip_record("camera.mp4", 1))
+    window._project_path = project_path
+    window._mark_project_dirty()
+    window.save_project()
+    window._write_automatic_backup()
+
+    restored = MainWindow()
+    restored._load_project_path(project_path)
+
+    assert restored.records == window.records
+    assert list((tmp_path / ".backups").glob("work_*.labelproj"))
+
+
+def test_annotation_change_starts_or_resets_backup_debounce(qt_app, tmp_path):
+    window = MainWindow()
+    window._project_path = tmp_path / "work.labelproj"
+    window._mark_project_dirty()
+
+    assert window._project_dirty
+    assert window._backup_timer.isActive()
+    assert window._backup_timer.interval() == 30_000
+
+
+def test_project_file_pickers_request_non_native_dialogs(qt_app, monkeypatch):
+    window = MainWindow()
+    dialog_options = []
+
+    def save_file_name(*_args, **kwargs):
+        dialog_options.append(kwargs.get("options"))
+        return "", ""
+
+    def open_file_name(*_args, **kwargs):
+        dialog_options.append(kwargs.get("options"))
+        return "", ""
+
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName", staticmethod(save_file_name)
+    )
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(open_file_name)
+    )
+
+    window.save_project()
+    window.open_project()
+    window.restore_project_from_backup()
+
+    assert len(dialog_options) == 3
+    assert all(
+        option is not None and option & QFileDialog.Option.DontUseNativeDialog
+        for option in dialog_options
+    )
+
+
+def test_import_csv_replaces_active_project_segments_in_place(
+    qt_app, tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "camera.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    window.set_source_path(tmp_path / "camera.mp4")
+    active_records = window.records
+    active_records.append(_clip_record("camera.mp4", 99))
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert window.records is active_records
+    assert window.project.videos[0].segments is active_records
+    assert [record.sequence for record in active_records] == [1]
+
+
 def test_tag_area_no_scrollbar(qt_app):
     window = MainWindow()
     window.resize(1440, 900)

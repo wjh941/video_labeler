@@ -9,10 +9,19 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Property,
     QSignalBlocker,
+    QTimer,
     Qt,
     QUrl,
 )
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPen, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QShortcut,
+)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -48,6 +57,7 @@ from PySide6.QtWidgets import (
 from ..csv_io import read_clip_csv, write_clip_csv
 from ..export_worker import ExportSummary, ExportWorker
 from ..ffmpeg_service import format_seconds, resolve_ffmpeg
+from ..history import SegmentHistory
 from ..models import (
     BEHAVIOR_LABELS,
     LIGHTING_VALUES,
@@ -64,6 +74,15 @@ from ..naming import (
     normalize_view_token,
     parse_filename,
     validate_output_filename,
+)
+from ..project_io import (
+    LabelProject,
+    ProjectVideo,
+    add_or_activate_video,
+    create_backup,
+    load_project,
+    new_project,
+    save_project as write_label_project,
 )
 
 
@@ -199,6 +218,14 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.records: list[ClipRecord] = []
+        self.project: LabelProject = new_project()
+        self._project_path: Path | None = None
+        self._project_dirty = False
+        self._active_video_histories: dict[str, SegmentHistory] = {}
+        self._backup_timer = QTimer(self)
+        self._backup_timer.setSingleShot(True)
+        self._backup_timer.setInterval(30_000)
+        self._backup_timer.timeout.connect(self._write_automatic_backup)
         self.source_path: Path | None = None
         self.source_name = ""
         self.output_dir: Path | None = None
@@ -210,6 +237,7 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
 
         self._build_ui()
+        self._build_project_menu()
         self._connect_signals()
         self._update_filename_preview()
 
@@ -328,6 +356,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.advanced_export_group, 2, 0, 1, 6)
         return group
 
+    def _build_project_menu(self) -> None:
+        self.project_menu = self.menuBar().addMenu("工程")
+        self.new_project_action = QAction("新建工程", self)
+        self.open_project_action = QAction("打开工程", self)
+        self.save_project_action = QAction("保存工程", self)
+        self.restore_project_action = QAction("从备份文件恢复工程", self)
+        self.project_menu.addAction(self.new_project_action)
+        self.project_menu.addAction(self.open_project_action)
+        self.project_menu.addAction(self.save_project_action)
+        self.project_menu.addSeparator()
+        self.project_menu.addAction(self.restore_project_action)
+
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
         layout = QVBoxLayout(group)
@@ -385,10 +425,16 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
+        source_layout = QHBoxLayout()
         self.source_label = QLabel("未选择视频")
         self.source_label.setWordWrap(True)
         self.source_label.setObjectName("mutedLabel")
-        layout.addWidget(self.source_label)
+        self.project_video_combo = QComboBox()
+        self.project_video_combo.setMinimumContentsLength(16)
+        self.project_video_combo.setEnabled(False)
+        source_layout.addWidget(self.source_label, stretch=1)
+        source_layout.addWidget(self.project_video_combo)
+        layout.addLayout(source_layout)
 
         time_form = QFormLayout()
         self.start_spin = self._new_time_spin()
@@ -650,6 +696,17 @@ class MainWindow(QMainWindow):
         self.open_video_button.clicked.connect(self.open_video)
         self.import_csv_button.clicked.connect(self.import_csv)
         self.save_csv_button.clicked.connect(self.save_csv)
+        self.new_project_action.triggered.connect(self.new_project)
+        self.open_project_action.triggered.connect(self.open_project)
+        self.save_project_action.triggered.connect(self.save_project)
+        self.restore_project_action.triggered.connect(
+            self.restore_project_from_backup
+        )
+        self.project_video_combo.currentIndexChanged.connect(
+            lambda index: self.switch_active_video(
+                self.project_video_combo.itemData(index)
+            )
+        )
         self.output_folder_button.clicked.connect(self.select_output_folder)
         self.play_button.clicked.connect(self.toggle_playback)
         self.seek_back_button.clicked.connect(lambda: self._seek_relative(-5000))
@@ -754,10 +811,212 @@ class MainWindow(QMainWindow):
         self._create_shortcut_help_dialog().exec()
 
     def set_source_path(self, path: Path) -> None:
-        self.source_path = path
-        self.source_name = path.name
-        self.source_label.setText(path.name)
-        self._set_status(f"已选择视频：{path.name}")
+        entry = add_or_activate_video(self.project, path)
+        self._bind_active_video(entry)
+        self._mark_project_dirty()
+        self._set_status(f"已选择视频：{entry.path.name}")
+
+    def _bind_active_video(self, entry: ProjectVideo) -> None:
+        self.project.active_video_id = entry.id
+        self.records = entry.segments
+        self.source_path = entry.path
+        self.source_name = entry.path.name
+        self.source_label.setText(entry.path.name)
+        self._editing_index = None
+        self.add_button.setText("添加片段")
+        self._sync_project_video_combo()
+        self._refresh_table()
+
+    def _active_project_video(self) -> ProjectVideo | None:
+        active_id = self.project.active_video_id
+        return next(
+            (video for video in self.project.videos if video.id == active_id),
+            None,
+        )
+
+    def _sync_project_video_combo(self) -> None:
+        with QSignalBlocker(self.project_video_combo):
+            self.project_video_combo.clear()
+            for video in self.project.videos:
+                self.project_video_combo.addItem(video.path.name, video.id)
+            active_index = self.project_video_combo.findData(
+                self.project.active_video_id
+            )
+            self.project_video_combo.setCurrentIndex(active_index)
+            self.project_video_combo.setEnabled(bool(self.project.videos))
+
+    def switch_active_video(self, video_id: object) -> None:
+        if not isinstance(video_id, str):
+            return
+        entry = next(
+            (video for video in self.project.videos if video.id == video_id),
+            None,
+        )
+        if entry is None:
+            return
+        self._bind_active_video(entry)
+        self.task_table.clearSelection()
+        if entry.path.is_file():
+            self.player.setSource(QUrl.fromLocalFile(str(entry.path)))
+            self.player.pause()
+        else:
+            self.player.setSource(QUrl())
+            self._set_status(f"视频源不存在：{entry.path}")
+
+    def _project_snapshot(self) -> LabelProject:
+        settings = self.project.global_settings
+        settings["date"] = self.date_edit.text().strip()
+        settings["camera"] = self.camera_edit.text().strip()
+        settings["view"] = self.view_combo.currentText()
+        settings["output_dir"] = str(self.output_dir) if self.output_dir else ""
+        return self.project
+
+    def _mark_project_dirty(self) -> None:
+        self._project_dirty = True
+        self._schedule_project_backup()
+
+    def _schedule_project_backup(self) -> None:
+        if self._project_path is not None:
+            self._backup_timer.start()
+
+    def _write_automatic_backup(self) -> None:
+        if self._project_path is None:
+            return
+        try:
+            create_backup(self._project_path, self._project_snapshot())
+        except OSError as error:
+            self._set_status(f"自动备份失败：{error}")
+
+    def _confirm_discard_dirty_project(self) -> bool:
+        if not self._project_dirty:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "工程尚未保存",
+            "当前工程有未保存的修改，确定放弃这些修改吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _clear_project_workspace(self) -> None:
+        self._backup_timer.stop()
+        self.project = new_project()
+        self.records = []
+        self.source_path = None
+        self.source_name = ""
+        self._editing_index = None
+        self.source_label.setText("未选择视频")
+        self.project_video_combo.clear()
+        self.project_video_combo.setEnabled(False)
+        self.player.setSource(QUrl())
+        self._refresh_table()
+        self.clear_editor()
+
+    def new_project(self) -> None:
+        if not self._confirm_discard_dirty_project():
+            return
+        self._clear_project_workspace()
+        self._project_path = None
+        self._project_dirty = False
+        self._active_video_histories = {}
+        self._set_status("已新建工程")
+
+    def save_project(self) -> None:
+        project_path = self._project_path
+        if project_path is None:
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "保存工程",
+                "未命名工程.labelproj",
+                "标注工程 (*.labelproj)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
+            if not filename:
+                return
+            project_path = Path(filename)
+        try:
+            self._project_path = write_label_project(
+                project_path, self._project_snapshot()
+            )
+        except (OSError, ValueError) as error:
+            self._show_error("无法保存工程", f"保存工程失败：{error}")
+            return
+        self._project_dirty = False
+        self._set_status(f"已保存工程：{self._project_path}")
+
+    def open_project(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开工程",
+            "",
+            "标注工程 (*.labelproj)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename or not self._confirm_discard_dirty_project():
+            return
+        self._load_project_path(Path(filename))
+
+    def restore_project_from_backup(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "从备份文件恢复工程",
+            "",
+            "标注工程 (*.labelproj)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename or not self._confirm_discard_dirty_project():
+            return
+        backup_path = Path(filename)
+        self._load_project_path(backup_path)
+        if backup_path.parent.name == ".backups":
+            project_name, separator, _timestamp = backup_path.stem.rpartition("_")
+            if separator and project_name:
+                self._project_path = backup_path.parent.parent / (
+                    f"{project_name}.labelproj"
+                )
+        self._project_dirty = True
+        self._set_status(f"已从备份恢复工程：{backup_path.name}")
+
+    def _load_project_path(self, path: Path) -> None:
+        try:
+            project = load_project(path)
+        except (OSError, ValueError) as error:
+            self._show_error("无法打开工程", f"打开工程失败：{error}")
+            return
+
+        self._backup_timer.stop()
+        self.project = project
+        self._project_path = Path(path)
+        self._project_dirty = False
+        self._active_video_histories = {}
+        settings = project.global_settings
+        self.date_edit.setText(settings.get("date", self.date_edit.text()))
+        self.camera_edit.setText(settings.get("camera", self.camera_edit.text()))
+        if settings.get("view"):
+            self._set_custom_combo_value(
+                self.view_combo,
+                settings["view"],
+                normalize_view_token,
+            )
+        output_dir = settings.get("output_dir", "")
+        self.output_dir = Path(output_dir) if output_dir else None
+        self.output_folder_label.setText(
+            str(self.output_dir) if self.output_dir else "未选择输出文件夹"
+        )
+
+        entry = self._active_project_video()
+        if entry is None:
+            self.records = []
+            self.source_path = None
+            self.source_name = ""
+            self.source_label.setText("未选择视频")
+            self._sync_project_video_combo()
+            self._refresh_table()
+            self.player.setSource(QUrl())
+        else:
+            self.switch_active_video(entry.id)
+        self._set_status(f"已打开工程：{path.name}")
 
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -785,10 +1044,17 @@ class MainWindow(QMainWindow):
         if not filename:
             return
         try:
-            self.records = read_clip_csv(Path(filename))
+            imported_records = read_clip_csv(Path(filename))
         except (OSError, ValueError) as error:
             self._show_error("无法导入 CSV", f"导入 CSV 失败：{error}")
             return
+
+        active_video = self._active_project_video()
+        if active_video is None:
+            self.records = imported_records
+        else:
+            active_video.segments[:] = imported_records
+            self.records = active_video.segments
 
         if self.records:
             self.source_name = self.records[0].source
@@ -822,6 +1088,7 @@ class MainWindow(QMainWindow):
             )
         self._editing_index = None
         self._refresh_table()
+        self._mark_project_dirty()
         self._set_status(f"已导入 {len(self.records)} 个任务")
 
     def save_csv(self) -> None:
@@ -863,6 +1130,7 @@ class MainWindow(QMainWindow):
             return
         self.output_dir = Path(directory)
         self.output_folder_label.setText(str(self.output_dir))
+        self._mark_project_dirty()
         self._set_status(f"输出文件夹：{self.output_dir}")
 
     def set_clip_range(self, start_seconds: float, end_seconds: float) -> None:
@@ -921,6 +1189,7 @@ class MainWindow(QMainWindow):
             self._set_status(f"已更新片段 {sequence:03d}")
 
         self._refresh_table()
+        self._mark_project_dirty()
         self._prepare_next_clip(record.end_seconds)
 
     def remove_selected_clip(self) -> None:
@@ -1222,6 +1491,7 @@ class MainWindow(QMainWindow):
             self.records[index] = record
         self._editing_index = None
         self._refresh_table()
+        self._mark_project_dirty()
         if skipped_manual_view:
             self._set_status("批量修改完成；手动命名片段未更新视角")
         else:
@@ -1322,6 +1592,7 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self.add_button.setText("添加片段")
         self._refresh_table()
+        self._mark_project_dirty()
         self._set_status(f"已删除 {len(indexes)} 个片段")
 
     def _table_cell_changed(self, row: int, column: int) -> None:
@@ -1348,6 +1619,7 @@ class MainWindow(QMainWindow):
             self._refresh_table()
             return
         self.records[row].output = output
+        self._mark_project_dirty()
         self._set_status(f"已更新片段 {row + 1} 的输出文件名")
 
     def start_export(self) -> None:
@@ -1426,3 +1698,9 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
+
+    def closeEvent(self, event) -> None:
+        if self._confirm_discard_dirty_project():
+            event.accept()
+        else:
+            event.ignore()
