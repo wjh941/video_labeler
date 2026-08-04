@@ -1021,6 +1021,28 @@ class MainWindow(QMainWindow):
         self._set_status(f"已打开工程：{path.name}")
         return True
 
+    @staticmethod
+    def _resolve_import_source_path(source: str, csv_path: Path) -> Path:
+        source_path = Path(source).expanduser()
+        if not source_path.is_absolute():
+            source_path = csv_path.parent / source_path
+        return source_path.resolve(strict=False)
+
+    def _project_video_for_import_source(
+        self, source: str, csv_path: Path
+    ) -> ProjectVideo | None:
+        source_path = self._resolve_import_source_path(source, csv_path)
+        source_key = str(source_path).casefold()
+        source_name = source_path.name.casefold()
+        for video in self.project.videos:
+            video_path = video.path.expanduser().resolve(strict=False)
+            if (
+                str(video_path).casefold() == source_key
+                or video_path.name.casefold() == source_name
+            ):
+                return video
+        return None
+
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -1052,27 +1074,41 @@ class MainWindow(QMainWindow):
             self._show_error("无法导入 CSV", f"导入 CSV 失败：{error}")
             return
 
+        csv_path = Path(filename)
         active_video = self._active_project_video()
-        if active_video is None:
-            self.records = imported_records
-            if imported_records:
-                source_reference = Path(imported_records[0].source).expanduser()
-                if not source_reference.is_absolute():
-                    source_reference = Path(filename).parent / source_reference
-                active_video = add_or_activate_video(
-                    self.project, source_reference
+        source_groups: dict[str, list[ClipRecord]] = {}
+        for record in imported_records:
+            source_groups.setdefault(record.source, []).append(record)
+
+        imported_videos: list[ProjectVideo] = []
+        for source, records in source_groups.items():
+            video = self._project_video_for_import_source(source, csv_path)
+            if video is None:
+                video = add_or_activate_video(
+                    self.project,
+                    self._resolve_import_source_path(source, csv_path),
                 )
-                active_video.segments = self.records
-                self._bind_active_video(active_video)
+            video.segments[:] = records
+            imported_videos.append(video)
+
+        if imported_videos:
+            selected_video = (
+                active_video
+                if active_video in imported_videos
+                else imported_videos[0]
+            )
+            self._bind_active_video(selected_video)
+        elif active_video is not None:
+            active_video.segments.clear()
+            self._bind_active_video(active_video)
         else:
-            active_video.segments[:] = imported_records
-            self.records = active_video.segments
+            self.records = []
 
         if self.records:
             self.source_name = self.records[0].source
             self.source_label.setText(self.source_name)
             first_parsed: ParsedFilename | None = None
-            for record in self.records:
+            for record in imported_records:
                 parsed = parse_filename(record.output)
                 if parsed is None:
                     continue
@@ -1101,7 +1137,7 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self._refresh_table()
         self._mark_project_dirty()
-        self._set_status(f"已导入 {len(self.records)} 个任务")
+        self._set_status(f"已导入 {len(imported_records)} 个任务")
 
     def save_csv(self) -> None:
         if not self.records:

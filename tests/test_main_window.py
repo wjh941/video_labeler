@@ -364,6 +364,50 @@ def test_import_csv_without_active_video_creates_persisted_project_video(
     assert restored.project.videos[0].path.is_absolute()
 
 
+def test_import_csv_without_active_video_partitions_multiple_sources(
+    qt_app, tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "first.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+            "second.mp4,00:00:03.000,00:00:04.000,"
+            "20260729-cam02_indoor-fall-neg-daytime-002.mp4\n"
+            "first.mp4,00:00:05.000,00:00:06.000,"
+            "20260729-cam02_indoor-dog_out-pos-daytime-003.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert [video.path.name for video in window.project.videos] == [
+        "first.mp4",
+        "second.mp4",
+    ]
+    assert [record.source for record in window.project.videos[0].segments] == [
+        "first.mp4",
+        "first.mp4",
+    ]
+    assert [record.source for record in window.project.videos[1].segments] == [
+        "second.mp4"
+    ]
+    assert window.records is window.project.videos[0].segments
+
+    window.switch_active_video(window.project.videos[1].id)
+
+    assert window.records is window.project.videos[1].segments
+    assert [record.source for record in window.records] == ["second.mp4"]
+
+
 def test_restore_invalid_project_keeps_current_state_and_reports_no_success(
     qt_app, tmp_path, monkeypatch
 ):
