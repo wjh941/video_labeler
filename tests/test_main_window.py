@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSplitter,
+    QTableWidget,
 )
 
 from video_labeler.models import (
@@ -36,6 +37,17 @@ except ImportError:
 @pytest.fixture(scope="module")
 def qt_app():
     return QApplication.instance() or QApplication([])
+
+
+def _add_valid_clip(window: MainWindow, *, start: float, end: float, behavior: str) -> None:
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.polarity_combo.setCurrentText("pos")
+    window.lighting_combo.setCurrentText("daytime")
+    window.set_clip_range(start, end)
+    window.behavior_checks[behavior].setChecked(True)
+    window.add_or_update_clip()
 
 
 def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
@@ -866,21 +878,141 @@ def test_batch_view_update_preserves_manual_filename_and_reports_skip_status(qt_
     assert window.status_label.text() == "批量修改完成；手动命名片段未更新视角"
 
 
+def test_undo_redo_restore_added_updated_and_deleted_segments(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    active_records = window.records
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    window.set_clip_range(1, 3)
+    window.add_or_update_clip()
+    _add_valid_clip(window, start=3, end=4, behavior="fall")
+    assert [(record.sequence, record.end_seconds) for record in window.records] == [
+        (1, 3),
+        (2, 4),
+    ]
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+    window.task_table.selectRow(1)
+    window.remove_selected_clip()
+    assert [record.sequence for record in window.records] == [1]
+    assert window.undo_button.isEnabled()
+
+    window.undo_segments()
+    assert window.records is active_records
+    assert [(record.sequence, record.end_seconds) for record in window.records] == [
+        (1, 3),
+        (2, 4),
+    ]
+    assert window.redo_button.isEnabled()
+
+    window.undo_segments()
+    assert [(record.sequence, record.end_seconds) for record in window.records] == [
+        (1, 3),
+    ]
+    window.undo_segments()
+    assert [(record.sequence, record.end_seconds) for record in window.records] == [
+        (1, 2),
+    ]
+
+    window.redo_segments()
+    window.redo_segments()
+    window.redo_segments()
+    assert [record.sequence for record in window.records] == [1]
+
+
+def test_undo_history_is_scoped_to_active_video_and_cleared_by_new_project(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    window.set_source_path(first)
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+    first_id = window.project.active_video_id
+    assert window.undo_button.isEnabled()
+
+    window.set_source_path(second)
+    assert not window.undo_button.isEnabled()
+    _add_valid_clip(window, start=3, end=4, behavior="fall")
+    second_id = window.project.active_video_id
+    assert second_id != first_id
+
+    window.switch_active_video(first_id)
+    assert window.undo_button.isEnabled()
+    window.undo_segments()
+    assert window.records == []
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+    window.new_project()
+    assert window.records == []
+    assert not window.undo_button.isEnabled()
+    assert not window.redo_button.isEnabled()
+    assert window._active_video_histories == {}
+
+
+def test_undo_does_not_change_verified_next_clip_reset_fields(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+    window.view_combo.setCurrentText("indoor")
+    window.polarity_combo.setCurrentText("neg")
+    window.lighting_combo.setCurrentText("night_full_color")
+
+    window.undo_segments()
+
+    assert window.selected_behaviors() == ()
+    assert window.start_spin.value() == pytest.approx(2)
+    assert window.end_spin.value() == pytest.approx(2)
+    assert window.view_combo.currentText() == "indoor"
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+
+
+def test_batch_edit_does_not_become_a_segment_history_operation(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+    assert window.undo_button.isEnabled()
+
+    window._apply_batch_changes(
+        [0],
+        behaviors=("fall",),
+        polarity=None,
+        lighting=None,
+        view=None,
+    )
+
+    assert window.records[0].behaviors == ("fall",)
+    assert not window.undo_button.isEnabled()
+    assert not window.redo_button.isEnabled()
+
+
 def test_main_window_shortcut_mapping(qt_app):
     window = MainWindow()
 
     expected = {
         "play_pause": "Space",
-        "set_start": "I",
-        "set_end": "O",
-        "add_clip": "Return",
+        "previous_frame": "A",
+        "next_frame": "D",
+        "set_start": "S",
+        "set_end": "E",
         "delete_selected": "Del",
-        "save_csv": "Ctrl+S",
-        "start_export": "Ctrl+E",
-        "seek_back_5": "Left",
-        "seek_forward_5": "Right",
-        "seek_back_30": "Shift+Left",
-        "seek_forward_30": "Shift+Right",
+        "undo": "Ctrl+Z",
+        "redo": "Ctrl+Y",
+        "save_project": "Ctrl+S",
     }
 
     assert set(window.shortcuts) == set(expected)
@@ -890,9 +1022,26 @@ def test_main_window_shortcut_mapping(qt_app):
     )
     assert window.shortcut_help_button.text() == "快捷键说明"
     assert "空格" in window.shortcut_hint_label.text()
+    assert "I/O" not in window.shortcut_hint_label.text()
+    assert "Ctrl+E" not in window.shortcut_hint_label.text()
 
     dialog = window._create_shortcut_help_dialog()
     assert dialog.windowTitle() == "快捷键说明"
+    help_table = dialog.findChild(QTableWidget)
+    assert help_table is not None
+    assert [
+        help_table.item(row, 0).text() for row in range(help_table.rowCount())
+    ] == [
+        "Space",
+        "A",
+        "D",
+        "S",
+        "E",
+        "Del",
+        "Ctrl+Z",
+        "Ctrl+Y",
+        "Ctrl+S",
+    ]
 
 
 def test_editable_metadata_combos_include_custom_action(qt_app):

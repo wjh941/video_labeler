@@ -108,14 +108,14 @@ STATUS_LABELS = {
 }
 SHORTCUT_HELP_ROWS = (
     ("Space", "播放或暂停"),
-    ("I", "设置起始点"),
-    ("O", "设置结束点"),
-    ("Enter", "添加或更新片段"),
-    ("Delete", "删除选中片段"),
-    ("Ctrl+S", "保存标注 CSV"),
-    ("Ctrl+E", "批量导出"),
-    ("Left / Right", "后退或前进 5 秒"),
-    ("Shift+Left / Shift+Right", "后退或前进 30 秒"),
+    ("A", "上一帧"),
+    ("D", "下一帧"),
+    ("S", "设置起始点"),
+    ("E", "设置结束点"),
+    ("Del", "删除选中片段"),
+    ("Ctrl+Z", "撤销片段操作"),
+    ("Ctrl+Y", "重做片段操作"),
+    ("Ctrl+S", "保存标注工程 (*.labelproj)"),
 )
 
 
@@ -240,6 +240,7 @@ class MainWindow(QMainWindow):
         self._build_project_menu()
         self._connect_signals()
         self._update_filename_preview()
+        self._update_history_controls()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -450,11 +451,17 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         self.add_button = QPushButton("添加片段")
         self.remove_button = QPushButton("删除所选")
+        self.undo_button = QPushButton("撤销")
+        self.redo_button = QPushButton("重做")
         self.clear_button = QPushButton("清空编辑区")
         self.add_button.setObjectName("addClipButton")
         self.remove_button.setObjectName("dangerButton")
+        self.undo_button.setObjectName("undoButton")
+        self.redo_button.setObjectName("redoButton")
         actions.addWidget(self.add_button)
         actions.addWidget(self.remove_button)
+        actions.addWidget(self.undo_button)
+        actions.addWidget(self.redo_button)
         actions.addWidget(self.clear_button)
         layout.addLayout(actions)
 
@@ -594,8 +601,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setTextVisible(True)
         self.status_label = QLabel("就绪")
         self.shortcut_hint_label = QLabel(
-            "快捷键：空格 播放/暂停，I/O 设置起止点，Enter 添加，Delete 删除，"
-            "Ctrl+S 保存，Ctrl+E 导出"
+            "快捷键：空格 播放/暂停，A/D 前后帧，S/E 设置起止点，Del 删除，"
+            "Ctrl+Z/Y 撤销/重做，Ctrl+S 保存工程"
         )
 
         layout.addWidget(self.cancel_export_button)
@@ -711,12 +718,8 @@ class MainWindow(QMainWindow):
         self.play_button.clicked.connect(self.toggle_playback)
         self.seek_back_button.clicked.connect(lambda: self._seek_relative(-5000))
         self.seek_forward_button.clicked.connect(lambda: self._seek_relative(5000))
-        self.set_start_button.clicked.connect(
-            lambda: self.start_spin.setValue(self.player.position() / 1000)
-        )
-        self.set_end_button.clicked.connect(
-            lambda: self.end_spin.setValue(self.player.position() / 1000)
-        )
+        self.set_start_button.clicked.connect(self._set_start_from_player)
+        self.set_end_button.clicked.connect(self._set_end_from_player)
         self.timeline_slider.valueChanged.connect(self._seek_to_milliseconds)
         self.speed_combo.currentIndexChanged.connect(self._set_playback_rate)
         self.player.positionChanged.connect(self._update_position)
@@ -738,6 +741,8 @@ class MainWindow(QMainWindow):
 
         self.add_button.clicked.connect(self.add_or_update_clip)
         self.remove_button.clicked.connect(self.remove_selected_clip)
+        self.undo_button.clicked.connect(self.undo_segments)
+        self.redo_button.clicked.connect(self.redo_segments)
         self.clear_button.clicked.connect(self.clear_editor)
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
@@ -763,22 +768,14 @@ class MainWindow(QMainWindow):
     def _register_shortcuts(self) -> None:
         bindings = {
             "play_pause": ("Space", self.toggle_playback),
-            "set_start": (
-                "I",
-                lambda: self.start_spin.setValue(self.player.position() / 1000),
-            ),
-            "set_end": (
-                "O",
-                lambda: self.end_spin.setValue(self.player.position() / 1000),
-            ),
-            "add_clip": ("Return", self.add_or_update_clip),
+            "previous_frame": ("A", lambda: self._step_frame(-1)),
+            "next_frame": ("D", lambda: self._step_frame(1)),
+            "set_start": ("S", self._set_start_from_player),
+            "set_end": ("E", self._set_end_from_player),
             "delete_selected": ("Del", self.remove_selected_clip),
-            "save_csv": ("Ctrl+S", self.save_csv),
-            "start_export": ("Ctrl+E", self.start_export),
-            "seek_back_5": ("Left", lambda: self._seek_relative(-5000)),
-            "seek_forward_5": ("Right", lambda: self._seek_relative(5000)),
-            "seek_back_30": ("Shift+Left", lambda: self._seek_relative(-30000)),
-            "seek_forward_30": ("Shift+Right", lambda: self._seek_relative(30000)),
+            "undo": ("Ctrl+Z", self.undo_segments),
+            "redo": ("Ctrl+Y", self.redo_segments),
+            "save_project": ("Ctrl+S", self.save_project),
         }
         self.shortcuts = {}
         for name, (sequence, callback) in bindings.items():
@@ -826,6 +823,7 @@ class MainWindow(QMainWindow):
         self.add_button.setText("添加片段")
         self._sync_project_video_combo()
         self._refresh_table()
+        self._update_history_controls()
 
     def _active_project_video(self) -> ProjectVideo | None:
         active_id = self.project.active_video_id
@@ -833,6 +831,27 @@ class MainWindow(QMainWindow):
             (video for video in self.project.videos if video.id == active_id),
             None,
         )
+
+    def _active_history(self, *, create: bool = False) -> SegmentHistory | None:
+        active_video = self._active_project_video()
+        if active_video is None:
+            return None
+        if create:
+            return self._active_video_histories.setdefault(
+                active_video.id, SegmentHistory()
+            )
+        return self._active_video_histories.get(active_video.id)
+
+    def _clear_active_history(self) -> None:
+        active_video = self._active_project_video()
+        if active_video is not None:
+            self._active_video_histories.pop(active_video.id, None)
+        self._update_history_controls()
+
+    def _update_history_controls(self) -> None:
+        history = self._active_history()
+        self.undo_button.setEnabled(history is not None and history.can_undo())
+        self.redo_button.setEnabled(history is not None and history.can_redo())
 
     def _sync_project_video_combo(self) -> None:
         with QSignalBlocker(self.project_video_combo):
@@ -916,10 +935,11 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         if not self._confirm_discard_dirty_project():
             return
+        self._active_video_histories = {}
         self._clear_project_workspace()
         self._project_path = None
         self._project_dirty = False
-        self._active_video_histories = {}
+        self._update_history_controls()
         self._set_status("已新建工程")
 
     def save_project(self) -> None:
@@ -1088,6 +1108,7 @@ class MainWindow(QMainWindow):
             video.segments[:] = records
             project_videos[source_key] = video
             imported_videos[source_key] = video
+            self._active_video_histories.pop(video.id, None)
 
         if imported_videos:
             active_key = (
@@ -1101,6 +1122,7 @@ class MainWindow(QMainWindow):
             self._bind_active_video(selected_video)
         elif active_video is not None:
             active_video.segments.clear()
+            self._active_video_histories.pop(active_video.id, None)
             self._bind_active_video(active_video)
         else:
             self.records = []
@@ -1138,6 +1160,7 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self._refresh_table()
         self._mark_project_dirty()
+        self._update_history_controls()
         self._set_status(f"已导入 {len(imported_records)} 个任务")
 
     def save_csv(self) -> None:
@@ -1230,6 +1253,7 @@ class MainWindow(QMainWindow):
             lighting=lighting,
             sequence=sequence,
         )
+        before = list(self.records)
         if self._editing_index is None:
             self.records.append(record)
             self._set_status(f"已添加片段 {sequence:03d}")
@@ -1237,12 +1261,38 @@ class MainWindow(QMainWindow):
             self.records[self._editing_index] = record
             self._set_status(f"已更新片段 {sequence:03d}")
 
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
         self._refresh_table()
         self._mark_project_dirty()
         self._prepare_next_clip(record.end_seconds)
+        self._update_history_controls()
 
     def remove_selected_clip(self) -> None:
         self._delete_selected_records()
+
+    def undo_segments(self) -> None:
+        history = self._active_history()
+        if history is None or not history.can_undo():
+            return
+        self.records[:] = history.undo(self.records)
+        self._editing_index = None
+        self.task_table.clearSelection()
+        self._refresh_table()
+        self._mark_project_dirty()
+        self._update_history_controls()
+
+    def redo_segments(self) -> None:
+        history = self._active_history()
+        if history is None or not history.can_redo():
+            return
+        self.records[:] = history.redo(self.records)
+        self._editing_index = None
+        self.task_table.clearSelection()
+        self._refresh_table()
+        self._mark_project_dirty()
+        self._update_history_controls()
 
     def clear_editor(self) -> None:
         self._editing_index = None
@@ -1274,6 +1324,15 @@ class MainWindow(QMainWindow):
             self.player.pause()
         else:
             self.player.play()
+
+    def _set_start_from_player(self) -> None:
+        self.start_spin.setValue(self.player.position() / 1000)
+
+    def _set_end_from_player(self) -> None:
+        self.end_spin.setValue(self.player.position() / 1000)
+
+    def _step_frame(self, direction: int) -> None:
+        self._seek_relative(33 * direction)
 
     def _seek_relative(self, milliseconds: int) -> None:
         duration = self.player.duration()
@@ -1426,6 +1485,7 @@ class MainWindow(QMainWindow):
             self.records.sort(key=lambda record: record.sequence, reverse=reverse)
         self._editing_index = None
         self._refresh_table()
+        self._clear_active_history()
 
     @staticmethod
     def _apply_status_color(item: QTableWidgetItem, status: str) -> None:
@@ -1541,6 +1601,7 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self._refresh_table()
         self._mark_project_dirty()
+        self._clear_active_history()
         if skipped_manual_view:
             self._set_status("批量修改完成；手动命名片段未更新视角")
         else:
@@ -1635,13 +1696,18 @@ class MainWindow(QMainWindow):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        before = list(self.records)
         self.task_table.clearSelection()
         for index in reversed(indexes):
             del self.records[index]
         self._editing_index = None
         self.add_button.setText("添加片段")
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
         self._refresh_table()
         self._mark_project_dirty()
+        self._update_history_controls()
         self._set_status(f"已删除 {len(indexes)} 个片段")
 
     def _table_cell_changed(self, row: int, column: int) -> None:
@@ -1669,6 +1735,7 @@ class MainWindow(QMainWindow):
             return
         self.records[row].output = output
         self._mark_project_dirty()
+        self._clear_active_history()
         self._set_status(f"已更新片段 {row + 1} 的输出文件名")
 
     def start_export(self) -> None:
