@@ -33,6 +33,7 @@ from video_labeler.models import (
     POLARITIES,
     ClipRecord,
 )
+from video_labeler.ffmpeg_service import ExportResult
 
 try:
     from video_labeler.ui.main_window import MainWindow
@@ -253,6 +254,7 @@ def test_main_window_uses_semantic_style_object_names(qt_app):
 
     assert window.output_folder_label.objectName() == "mutedLabel"
     assert window.source_label.objectName() == "mutedLabel"
+    assert window.project_video_combo.objectName() == "projectVideoCombo"
     assert window.video_widget.objectName() == "videoSurface"
     assert window.behaviors_group.objectName() == "collapsibleBehaviorGroup"
 
@@ -316,6 +318,18 @@ def _clip_record(source: str, sequence: int) -> ClipRecord:
         lighting="daytime",
         sequence=sequence,
     )
+
+
+def _wait_for_export_completion(qt_app, window: MainWindow) -> None:
+    worker = window._export_worker
+    assert worker is not None
+    for _ in range(100):
+        qt_app.processEvents()
+        if window._export_worker is None:
+            assert worker.wait(1000)
+            return
+        QTest.qWait(10)
+    pytest.fail("export worker did not complete")
 
 
 def test_switching_project_video_rebinds_records_without_cross_video_leakage(
@@ -423,6 +437,241 @@ def test_import_csv_replaces_active_project_segments_in_place(
     assert window.records is active_records
     assert window.project.videos[0].segments is active_records
     assert [record.sequence for record in active_records] == [1]
+
+
+def test_import_csv_activating_different_video_rebinds_media_source(
+    qt_app, tmp_path, monkeypatch
+):
+    current_path = tmp_path / "current.mp4"
+    selected_path = tmp_path / "selected.mp4"
+    other_path = tmp_path / "other.mp4"
+    csv_path = tmp_path / "clips.csv"
+    current_path.touch()
+    selected_path.touch()
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            f"{selected_path},00:00:01.000,00:00:02.000,"
+            "20260202-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+            f"{other_path},00:00:03.000,00:00:04.000,"
+            "20260303-cam03_closeup-fall-neg-night_black_white-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    window.set_source_path(current_path)
+    window.switch_active_video(window.project.active_video_id)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    selected_video = next(
+        video for video in window.project.videos if video.path == selected_path
+    )
+    assert window.project.active_video_id == selected_video.id
+    assert window.project_video_combo.currentData() == selected_video.id
+    assert window.source_path == selected_path
+    assert window.records is selected_video.segments
+    assert [record.source for record in window.records] == [str(selected_path)]
+    assert Path(window.player.source().toLocalFile()) == selected_path
+
+
+def test_import_csv_activating_missing_video_clears_media_source(
+    qt_app, tmp_path, monkeypatch
+):
+    current_path = tmp_path / "current.mp4"
+    missing_path = tmp_path / "missing.mp4"
+    other_path = tmp_path / "other.mp4"
+    csv_path = tmp_path / "clips.csv"
+    current_path.touch()
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            f"{missing_path},00:00:01.000,00:00:02.000,"
+            "20260202-cam02_indoor-dog_out-pos-daytime-001.mp4\n"
+            f"{other_path},00:00:03.000,00:00:04.000,"
+            "20260303-cam03_closeup-fall-neg-night_black_white-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    window.set_source_path(current_path)
+    window.switch_active_video(window.project.active_video_id)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert window.source_path == missing_path
+    assert [record.source for record in window.records] == [str(missing_path)]
+    assert window.player.source().isEmpty()
+
+
+def test_import_csv_restores_defaults_from_selected_active_video(
+    qt_app, tmp_path, monkeypatch
+):
+    active_path = tmp_path / "active.mp4"
+    other_path = tmp_path / "other.mp4"
+    csv_path = tmp_path / "clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            f"{other_path},00:00:01.000,00:00:02.000,"
+            "20260101-cam01_panorama-fall-neg-night_black_white-001.mp4\n"
+            f"{active_path},00:00:03.000,00:00:04.000,"
+            "20260202-cam02_indoor-dog_out-pos-daytime-002.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    window.set_source_path(active_path)
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV")),
+    )
+
+    window.import_csv()
+
+    assert window.source_path == active_path
+    assert [record.source for record in window.records] == [str(active_path)]
+    assert window.date_edit.text() == "20260202"
+    assert window.camera_edit.text() == "cam02"
+    assert window.view_combo.currentText() == "indoor"
+    assert window.polarity_combo.currentText() == "pos"
+    assert window.lighting_combo.currentText() == "daytime"
+    assert window.sequence_spin.value() == 3
+
+
+@pytest.mark.parametrize(
+    ("control_name", "value"),
+    (
+        ("date_edit", "20260804"),
+        ("camera_edit", "cam04"),
+        ("view_combo", "closeup"),
+    ),
+)
+def test_saved_project_global_setting_change_marks_dirty_and_restarts_backup(
+    qt_app, tmp_path, control_name, value
+):
+    window = MainWindow()
+    window._project_path = tmp_path / "work.labelproj"
+    window._project_dirty = False
+    window._backup_timer.stop()
+
+    control = getattr(window, control_name)
+    if control_name == "view_combo":
+        control.setCurrentText(value)
+    else:
+        control.setText(value)
+
+    assert window._project_dirty
+    assert window._backup_timer.isActive()
+    assert window._backup_timer.interval() == 30_000
+
+
+def test_export_status_change_marks_saved_project_dirty_and_persists(
+    qt_app, tmp_path, monkeypatch
+):
+    source_path = tmp_path / "source.mp4"
+    project_path = tmp_path / "work.labelproj"
+    output_dir = tmp_path / "output"
+    source_path.touch()
+    window = MainWindow()
+    window.set_source_path(source_path)
+    window.records.append(_clip_record(source_path.name, 1))
+    window.output_dir = output_dir
+    window._project_path = project_path
+    window.save_project()
+    window._backup_timer.stop()
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
+    )
+    monkeypatch.setattr(
+        "video_labeler.export_worker.run_clip_export",
+        lambda request: ExportResult(
+            status="fail", output=request.output_path.name, error="simulated failure"
+        ),
+    )
+
+    window.start_export()
+    _wait_for_export_completion(qt_app, window)
+
+    assert window.records[0].status == "fail"
+    assert window.records[0].error == "simulated failure"
+    assert window._project_dirty
+    assert window._backup_timer.isActive()
+
+    window.save_project()
+    restored = MainWindow()
+
+    assert restored._load_project_path(project_path)
+    assert restored.records[0].status == "fail"
+    assert restored.records[0].error == "simulated failure"
+
+
+def test_export_with_unchanged_record_state_keeps_saved_project_clean(
+    qt_app, tmp_path, monkeypatch
+):
+    source_path = tmp_path / "source.mp4"
+    output_dir = tmp_path / "output"
+    source_path.touch()
+    window = MainWindow()
+    window.set_source_path(source_path)
+    window.records.append(_clip_record(source_path.name, 1))
+    window.records[0].status = "skip"
+    window.output_dir = output_dir
+    window._project_path = tmp_path / "work.labelproj"
+    window.save_project()
+    window._backup_timer.stop()
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
+    )
+    monkeypatch.setattr(
+        "video_labeler.export_worker.run_clip_export",
+        lambda request: ExportResult(status="skip", output=request.output_path.name),
+    )
+
+    window.start_export()
+    _wait_for_export_completion(qt_app, window)
+
+    assert not window._project_dirty
+    assert not window._backup_timer.isActive()
+
+
+def test_export_status_change_without_saved_project_keeps_project_clean(
+    qt_app, tmp_path, monkeypatch
+):
+    source_path = tmp_path / "source.mp4"
+    output_dir = tmp_path / "output"
+    source_path.touch()
+    window = MainWindow()
+    window.set_source_path(source_path)
+    window.records.append(_clip_record(source_path.name, 1))
+    window.output_dir = output_dir
+    window._project_dirty = False
+    window._backup_timer.stop()
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
+    )
+    monkeypatch.setattr(
+        "video_labeler.export_worker.run_clip_export",
+        lambda request: ExportResult(status="ok", output=request.output_path.name),
+    )
+
+    window.start_export()
+    _wait_for_export_completion(qt_app, window)
+
+    assert window.records[0].status == "ok"
+    assert not window._project_dirty
+    assert not window._backup_timer.isActive()
 
 
 def test_import_csv_without_active_video_creates_persisted_project_video(

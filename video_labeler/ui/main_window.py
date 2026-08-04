@@ -235,6 +235,8 @@ class MainWindow(QMainWindow):
         self.output_dir: Path | None = None
         self._editing_index: int | None = None
         self._export_worker: ExportWorker | None = None
+        self._export_records: list[ClipRecord] = []
+        self._export_record_states: list[tuple[str, str]] = []
 
         self.setWindowTitle("视频片段标注工具")
         self.setMinimumSize(1120, 720)
@@ -437,6 +439,7 @@ class MainWindow(QMainWindow):
         self.source_label.setWordWrap(True)
         self.source_label.setObjectName("mutedLabel")
         self.project_video_combo = QComboBox()
+        self.project_video_combo.setObjectName("projectVideoCombo")
         self.project_video_combo.setMinimumContentsLength(16)
         self.project_video_combo.setEnabled(False)
         source_layout.addWidget(self.source_label, stretch=1)
@@ -845,6 +848,9 @@ class MainWindow(QMainWindow):
         self.date_edit.textChanged.connect(self._update_filename_preview)
         self.camera_edit.textChanged.connect(self._update_filename_preview)
         self.view_combo.currentTextChanged.connect(self._update_filename_preview)
+        self.date_edit.textChanged.connect(self._mark_project_dirty)
+        self.camera_edit.textChanged.connect(self._mark_project_dirty)
+        self.view_combo.currentTextChanged.connect(self._mark_project_dirty)
         self.polarity_combo.currentTextChanged.connect(self._update_filename_preview)
         self.lighting_combo.currentTextChanged.connect(self._update_filename_preview)
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
@@ -1150,6 +1156,8 @@ class MainWindow(QMainWindow):
             self.player.setSource(QUrl())
         else:
             self.switch_active_video(entry.id)
+        self._project_dirty = False
+        self._backup_timer.stop()
         self._set_status(f"已打开工程：{path.name}")
         return True
 
@@ -1231,11 +1239,11 @@ class MainWindow(QMainWindow):
             selected_video = imported_videos.get(active_key)
             if selected_video is None:
                 selected_video = next(iter(imported_videos.values()))
-            self._bind_active_video(selected_video)
+            self.switch_active_video(selected_video.id)
         elif active_video is not None:
             active_video.segments.clear()
             self._active_video_histories.pop(active_video.id, None)
-            self._bind_active_video(active_video)
+            self.switch_active_video(active_video.id)
         else:
             self.records = []
 
@@ -1243,7 +1251,7 @@ class MainWindow(QMainWindow):
             self.source_name = self.records[0].source
             self.source_label.setText(self.source_name)
             first_parsed: ParsedFilename | None = None
-            for record in imported_records:
+            for record in self.records:
                 parsed = parse_filename(record.output)
                 if parsed is None:
                     continue
@@ -1886,6 +1894,10 @@ class MainWindow(QMainWindow):
             overwrite=self.overwrite_check.isChecked(),
             workers=self.workers_spin.value(),
         )
+        self._export_records = list(self.records)
+        self._export_record_states = [
+            (record.status, record.error) for record in self._export_records
+        ]
         self._export_worker.clip_finished.connect(self._export_clip_finished)
         self._export_worker.progress.connect(self._export_progress)
         self._export_worker.export_completed.connect(self._export_completed)
@@ -1904,6 +1916,16 @@ class MainWindow(QMainWindow):
 
     def _export_clip_finished(self, _index: int, _result: object) -> None:
         self._refresh_table()
+        if not 0 <= _index < len(self._export_records):
+            return
+        record = self._export_records[_index]
+        record_state = (record.status, record.error)
+        if (
+            self._project_path is not None
+            and record_state != self._export_record_states[_index]
+        ):
+            self._mark_project_dirty()
+        self._export_record_states[_index] = record_state
 
     def _export_progress(self, completed: int, total: int) -> None:
         self.progress_bar.setMaximum(total)
@@ -1914,6 +1936,8 @@ class MainWindow(QMainWindow):
         self.export_button.setEnabled(True)
         self.cancel_export_button.setEnabled(False)
         self._export_worker = None
+        self._export_records = []
+        self._export_record_states = []
         self._set_status(
             "导出完成："
             f"成功={summary.success} 跳过={summary.skipped} "
