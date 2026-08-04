@@ -37,7 +37,7 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_add_clip_keep_label_selected(qt_app, tmp_path):
+def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
     window = MainWindow()
     source_path = tmp_path / "source.mp4"
     window.set_source_path(source_path)
@@ -52,12 +52,79 @@ def test_add_clip_keep_label_selected(qt_app, tmp_path):
 
     window.add_or_update_clip()
 
+    assert len(window.records) == 1
     assert window.sequence_spin.value() == 2
-    assert window.behavior_checks["dog_out"].isChecked()
-    assert window.behavior_checks["fall"].isChecked()
+    assert window.start_spin.value() == pytest.approx(2.0)
+    assert window.end_spin.value() == pytest.approx(2.0)
+    assert window.selected_behaviors() == ()
     assert window.view_combo.currentText() == "indoor"
     assert window.polarity_combo.currentText() == "neg"
     assert window.lighting_combo.currentText() == "night_full_color"
+    assert window._editing_index is None
+    assert window.add_button.text() == "添加片段"
+
+
+def test_update_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.behavior_checks["dog_out"].setChecked(True)
+    window.polarity_combo.setCurrentText("neg")
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.set_clip_range(1.0, 2.0)
+    window.add_or_update_clip()
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    window.set_clip_range(1.0, 6.5)
+    window.behavior_checks["fall"].setChecked(True)
+    window.add_or_update_clip()
+
+    assert len(window.records) == 1
+    assert window.records[0].end_seconds == pytest.approx(6.5)
+    assert window.sequence_spin.value() == 2
+    assert window.start_spin.value() == pytest.approx(6.5)
+    assert window.end_spin.value() == pytest.approx(6.5)
+    assert window.selected_behaviors() == ()
+    assert window.view_combo.currentText() == "indoor"
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+    assert window._editing_index is None
+    assert window.add_button.text() == "添加片段"
+
+
+def test_selecting_clip_restores_all_annotation_fields(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=12.5,
+            end_seconds=18.75,
+            output=(
+                "20260729-cam02_indoor-dog_out+fall-neg-"
+                "night_full_color-007.mp4"
+            ),
+            behaviors=("dog_out", "fall"),
+            polarity="neg",
+            lighting="night_full_color",
+            sequence=7,
+        )
+    ]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window._editing_index == 0
+    assert window.start_spin.value() == pytest.approx(12.5)
+    assert window.end_spin.value() == pytest.approx(18.75)
+    assert window.sequence_spin.value() == 7
+    assert set(window.selected_behaviors()) == {"dog_out", "fall"}
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+    assert window.view_combo.currentText() == "indoor"
+    assert window.add_button.text() == "更新片段"
 
 
 def test_collapsible_behavior_group(qt_app):
@@ -733,6 +800,7 @@ def test_adding_clips_generates_sequential_task_filenames(qt_app, tmp_path):
     window.add_or_update_clip()
 
     window.set_clip_range(5.0, 7.0)
+    window.behavior_checks["dog_out"].setChecked(True)
     window.add_or_update_clip()
 
     assert [record.output for record in window.records] == [

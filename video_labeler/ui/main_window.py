@@ -918,17 +918,13 @@ class MainWindow(QMainWindow):
         )
         if self._editing_index is None:
             self.records.append(record)
-            self.sequence_spin.setValue(
-                next_sequence([item.sequence for item in self.records])
-            )
             self._set_status(f"已添加片段 {sequence:03d}")
         else:
             self.records[self._editing_index] = record
             self._set_status(f"已更新片段 {sequence:03d}")
 
-        self._editing_index = None
-        self.add_button.setText("添加片段")
         self._refresh_table()
+        self._prepare_next_clip(record.end_seconds)
 
     def remove_selected_clip(self) -> None:
         self._delete_selected_records()
@@ -945,6 +941,17 @@ class MainWindow(QMainWindow):
             next_sequence([record.sequence for record in self.records])
         )
         self.add_button.setText("添加片段")
+        self._update_filename_preview()
+
+    def _prepare_next_clip(self, saved_end_seconds: float) -> None:
+        self._editing_index = None
+        self.add_button.setText("添加片段")
+        self.set_clip_range(saved_end_seconds, saved_end_seconds)
+        for checkbox in self.behavior_checks.values():
+            checkbox.setChecked(False)
+        self.sequence_spin.setValue(
+            next_sequence([record.sequence for record in self.records])
+        )
         self._update_filename_preview()
 
     def toggle_playback(self) -> None:
