@@ -101,6 +101,7 @@ TABLE_COLUMNS = (
     "状态",
     "错误信息",
 )
+BEHAVIOR_COLUMN_PADDING = 16
 CUSTOM_OPTION_TEXT = "自定义..."
 STATUS_LABELS = {
     "queued": "排队中",
@@ -533,7 +534,7 @@ class MainWindow(QMainWindow):
             )
         while self.behavior_checks_layout.count():
             self.behavior_checks_layout.takeAt(0)
-        for column in range(4):
+        for column in range(3):
             self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
             self.behavior_checks_layout.setColumnStretch(column, 0)
         rows = (len(self.behavior_checks) + columns - 1) // columns
@@ -553,25 +554,25 @@ class MainWindow(QMainWindow):
     def _behavior_layout_for_width(self, available_width: int) -> tuple[int, list[int]]:
         checks = list(self.behavior_checks.values())
         spacing = self.behavior_checks_layout.horizontalSpacing()
-        fallback_widths = [0, 0]
+        two_column_widths = self._behavior_column_widths(checks, 2)
+        three_column_widths = self._behavior_column_widths(checks, 3)
+        three_column_width = sum(three_column_widths) + spacing * 2
+        if available_width >= three_column_width:
+            return 3, three_column_widths
+        return 2, two_column_widths
+
+    @staticmethod
+    def _behavior_column_widths(
+        checks: list[QCheckBox], columns: int
+    ) -> list[int]:
+        column_widths = [0] * columns
         for index, checkbox in enumerate(checks):
-            column = index % 2
-            fallback_widths[column] = max(
-                fallback_widths[column], checkbox.sizeHint().width()
+            column = index % columns
+            column_widths[column] = max(
+                column_widths[column],
+                checkbox.sizeHint().width() + BEHAVIOR_COLUMN_PADDING,
             )
-
-        for columns in range(4, 1, -1):
-            column_widths = [0] * columns
-            for index, checkbox in enumerate(checks):
-                column = index % columns
-                column_widths[column] = max(
-                    column_widths[column], checkbox.sizeHint().width()
-                )
-            required_width = sum(column_widths) + spacing * (columns - 1)
-            if required_width <= available_width:
-                return columns, column_widths
-
-        return 2, fallback_widths
+        return column_widths
 
     def _schedule_behavior_reflow(self) -> None:
         if self._behavior_reflow_pending:
@@ -580,7 +581,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._reflow_behavior_checks)
 
     def _release_behavior_width_constraints(self) -> None:
-        for column in range(4):
+        for column in range(3):
             self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
         for checkbox in self.behavior_checks.values():
             checkbox.setSizePolicy(

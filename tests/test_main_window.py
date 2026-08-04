@@ -74,6 +74,19 @@ def _wait_for_content_animation(qt_app, window: MainWindow) -> None:
     pytest.fail("行为标签折叠动画未完成")
 
 
+def _behavior_column_widths(window: MainWindow, columns: int) -> list[int]:
+    widths = [0] * columns
+    for index, checkbox in enumerate(window.behavior_checks.values()):
+        column = index % columns
+        widths[column] = max(widths[column], checkbox.sizeHint().width() + 16)
+    return widths
+
+
+def _three_column_threshold(window: MainWindow) -> int:
+    widths = _behavior_column_widths(window, 3)
+    return sum(widths) + window.behavior_checks_layout.horizontalSpacing() * 2
+
+
 def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
     window = MainWindow()
     source_path = tmp_path / "source.mp4"
@@ -644,7 +657,7 @@ def test_behavior_checks_reflow_after_annotation_splitter_moves(qt_app):
     window.editor_splitter.setSizes([620, 1200])
     _process_behavior_reflow(qt_app, window)
 
-    assert window.behavior_columns == 4
+    assert window.behavior_columns == 3
     assert all(
         checkbox.width() >= checkbox.sizeHint().width()
         and checkbox.geometry().right()
@@ -680,11 +693,80 @@ def test_behavior_checks_keep_row_major_label_order_after_reflow(qt_app):
     window.editor_splitter.setSizes([620, 1200])
     _process_behavior_reflow(qt_app, window)
 
-    assert window.behavior_columns == 4
+    assert window.behavior_columns == 3
     assert [
         window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
-        for column in range(4)
-    ] == list(BEHAVIOR_LABELS[:4])
+        for column in range(3)
+    ] == list(BEHAVIOR_LABELS[:3])
+
+
+def test_behavior_checks_choose_two_columns_below_three_column_threshold(qt_app):
+    window = MainWindow()
+    three_column_threshold = _three_column_threshold(window)
+
+    columns, column_widths = window._behavior_layout_for_width(
+        three_column_threshold - 1
+    )
+
+    assert columns == 2
+    assert column_widths == _behavior_column_widths(window, 2)
+    assert all(
+        column_widths[index % columns] >= checkbox.sizeHint().width() + 16
+        for index, checkbox in enumerate(window.behavior_checks.values())
+    )
+
+
+def test_behavior_checks_choose_three_columns_at_three_column_threshold(qt_app):
+    window = MainWindow()
+    three_column_threshold = _three_column_threshold(window)
+
+    columns, column_widths = window._behavior_layout_for_width(
+        three_column_threshold
+    )
+
+    assert columns == 3
+    assert column_widths == _behavior_column_widths(window, 3)
+    assert all(
+        column_widths[index % columns] >= checkbox.sizeHint().width() + 16
+        for index, checkbox in enumerate(window.behavior_checks.values())
+    )
+
+
+def test_behavior_checks_threshold_switching_keeps_row_major_geometry_non_overlapping(
+    qt_app,
+):
+    window = MainWindow()
+    window.show()
+    three_column_threshold = _three_column_threshold(window)
+    checks = list(window.behavior_checks.values())
+
+    for available_width, expected_columns in (
+        (three_column_threshold - 1, 2),
+        (three_column_threshold, 3),
+        (three_column_threshold - 1, 2),
+        (three_column_threshold, 3),
+    ):
+        window.behavior_checks_container.setFixedWidth(available_width)
+        window._reflow_behavior_checks()
+        qt_app.processEvents()
+        qt_app.processEvents()
+
+        assert window.behavior_columns == expected_columns
+        assert [
+            window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
+            for column in range(expected_columns)
+        ] == list(BEHAVIOR_LABELS[:expected_columns])
+        assert all(
+            checkbox.width() >= checkbox.sizeHint().width()
+            and checkbox.geometry().right()
+            < window.behavior_checks_container.width()
+            for checkbox in checks
+        )
+        assert not any(
+            checkbox.geometry().intersects(other.geometry())
+            for index, checkbox in enumerate(checks)
+            for other in checks[index + 1 :]
+        )
 
 
 def test_reflow_does_not_unrestrict_height_during_expand_animation(qt_app):
