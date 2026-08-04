@@ -254,10 +254,30 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget(self)
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(16, 14, 16, 14)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        root_layout.addWidget(self._build_project_header())
+        self.main_content_scroll = QScrollArea()
+        self.main_content_scroll.setObjectName("mainContentScroll")
+        self.main_content_scroll.setWidgetResizable(True)
+        self.main_content_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.main_content_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        self.workspace_content = QWidget()
+        self.workspace_content.setObjectName("workspaceContent")
+        self.workspace_content.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
+        content_layout = QVBoxLayout(self.workspace_content)
+        content_layout.setContentsMargins(16, 14, 16, 14)
+        content_layout.setSpacing(12)
+
+        content_layout.addWidget(self._build_project_header())
 
         self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
         self.workspace_splitter.setChildrenCollapsible(False)
@@ -279,15 +299,21 @@ class MainWindow(QMainWindow):
         self.editor_splitter.addWidget(self.annotation_scroll)
         self._set_annotation_minimum_width()
         self.editor_splitter.setSizes([616, 788])
+        self.editor_splitter.setMinimumHeight(560)
 
         self.workspace_splitter.addWidget(self.editor_splitter)
-        self.workspace_splitter.addWidget(self._build_task_table())
-        self.workspace_splitter.setSizes([520, 340])
+        self.task_panel = self._build_task_table()
+        self.task_panel.setMinimumHeight(320)
+        self.workspace_splitter.addWidget(self.task_panel)
+        self.workspace_splitter.setMinimumHeight(892)
+        self.workspace_splitter.setSizes([560, 320])
         self.workspace_splitter.setStretchFactor(0, 3)
         self.workspace_splitter.setStretchFactor(1, 2)
-        root_layout.addWidget(self.workspace_splitter, stretch=1)
-        root_layout.addLayout(self._build_export_status())
+        content_layout.addWidget(self.workspace_splitter, stretch=1)
+        content_layout.addLayout(self._build_export_status())
 
+        self.main_content_scroll.setWidget(self.workspace_content)
+        root_layout.addWidget(self.main_content_scroll)
         self.setCentralWidget(root)
 
     def _build_project_header(self) -> QGroupBox:
@@ -387,7 +413,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         self.video_widget = QGraphicsView()
-        self.video_widget.setMinimumHeight(300)
+        self.video_widget.setMinimumHeight(420)
         self.video_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -409,24 +435,31 @@ class MainWindow(QMainWindow):
         self.video_viewport = self.video_widget.viewport()
         self.video_viewport.installEventFilter(self)
         layout.addWidget(self.video_widget, stretch=1)
-        layout.addSpacing(6)
+        layout.addSpacing(16)
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(self.video_item)
 
+        self.video_controls_panel = QWidget()
+        self.video_controls_panel.setObjectName("videoControlsPanel")
+        video_controls_layout = QVBoxLayout(self.video_controls_panel)
+        video_controls_layout.setContentsMargins(12, 10, 12, 10)
+        video_controls_layout.setSpacing(8)
+
         position_layout = QHBoxLayout()
+        position_layout.addWidget(QLabel("播放进度"))
         self.position_label = QLabel("00:00:00.000")
         self.duration_label = QLabel("00:00:00.000")
         self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.setTracking(False)
+        self.timeline_slider.setMinimumHeight(28)
         position_layout.addWidget(self.position_label)
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
-        layout.addLayout(position_layout)
-        layout.addSpacing(4)
+        video_controls_layout.addLayout(position_layout)
 
         controls = QHBoxLayout()
         self.play_button = QPushButton("播放")
@@ -449,7 +482,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.set_end_button)
         controls.addWidget(QLabel("播放速度"))
         controls.addWidget(self.speed_combo)
-        layout.addLayout(controls)
+        video_controls_layout.addLayout(controls)
+        layout.addWidget(self.video_controls_panel)
         return group
 
     def _build_clip_editor(self) -> QGroupBox:

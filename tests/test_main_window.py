@@ -92,15 +92,23 @@ def _three_column_threshold(window: MainWindow) -> int:
 def _set_behavior_container_target_width(
     qt_app, window: MainWindow, target_width: int
 ) -> None:
-    horizontal_overhead = max(
-        0, window.annotation_scroll.width() - window.behavior_checks_container.width()
-    )
-    target_scroll_width = target_width + horizontal_overhead
-    splitter_content_width = sum(window.editor_splitter.sizes())
-    window.editor_splitter.setSizes(
-        [max(1, splitter_content_width - target_scroll_width), target_scroll_width]
-    )
-    _process_behavior_reflow(qt_app, window)
+    for _ in range(3):
+        horizontal_overhead = max(
+            0,
+            window.annotation_scroll.width()
+            - window.behavior_checks_container.width(),
+        )
+        target_scroll_width = target_width + horizontal_overhead
+        splitter_content_width = sum(window.editor_splitter.sizes())
+        window.editor_splitter.setSizes(
+            [
+                max(1, splitter_content_width - target_scroll_width),
+                target_scroll_width,
+            ]
+        )
+        _process_behavior_reflow(qt_app, window)
+        if window.behavior_checks_container.width() == target_width:
+            return
 
 
 def _assert_visible_behavior_grid(window: MainWindow, expected_columns: int) -> None:
@@ -1880,14 +1888,54 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
 
 
+def test_video_first_workspace_scrolls_instead_of_compressing_preview(qt_app):
+    window = MainWindow()
+    window.resize(1280, 720)
+    window.show()
+    qt_app.processEvents()
+
+    assert isinstance(window.main_content_scroll, QScrollArea)
+    assert window.main_content_scroll.widget() is window.workspace_content
+    assert window.main_content_scroll.verticalScrollBar().maximum() > 0
+    assert window.workspace_splitter.indexOf(window.editor_splitter) == 0
+    assert window.workspace_splitter.indexOf(window.task_panel) == 1
+    assert window.editor_splitter.minimumHeight() >= 560
+    assert window.video_widget.minimumHeight() >= 420
+
+    content = window.workspace_content
+    controls_bottom = window.video_controls_panel.mapTo(
+        content,
+        QPoint(0, window.video_controls_panel.height()),
+    ).y()
+    table_top = window.task_panel.mapTo(content, QPoint(0, 0)).y()
+
+    assert controls_bottom < table_top
+    assert window.task_panel.findChild(QTableWidget) is window.task_table
+
+    window.records = [_clip_record("source.mp4", 1)]
+    window._refresh_table()
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+
+    assert window._editing_index == 0
+
+
 def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
     window = MainWindow()
     window.resize(1280, 900)
     window.show()
     qt_app.processEvents()
 
-    preview = window.video_widget.geometry()
-    timeline = window.timeline_slider.geometry()
+    video_panel = window.video_widget.parentWidget()
+    preview_bottom = window.video_widget.mapTo(
+        video_panel,
+        QPoint(0, window.video_widget.height()),
+    ).y()
+    timeline_top = window.timeline_slider.mapTo(video_panel, QPoint(0, 0)).y()
+    timeline_bottom = window.timeline_slider.mapTo(
+        video_panel,
+        QPoint(0, window.timeline_slider.height()),
+    ).y()
     controls = (
         window.play_button,
         window.seek_back_button,
@@ -1898,10 +1946,10 @@ def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
     )
 
     assert window.video_widget.minimumHeight() >= 300
-    assert preview.bottom() + 14 < timeline.top()
+    assert preview_bottom + 14 < timeline_top
     assert all(
-        not preview.intersects(control.geometry())
-        and timeline.bottom() + 10 < control.geometry().top()
+        timeline_bottom + 6
+        <= control.mapTo(video_panel, QPoint(0, 0)).y()
         for control in controls
     )
 
@@ -1921,6 +1969,32 @@ def test_video_preview_uses_graphics_surface_that_stays_inside_its_viewport(
     )
     assert window.video_item.size().height() == pytest.approx(
         window.video_widget.viewport().height()
+    )
+
+
+def test_video_progress_and_controls_use_a_dedicated_panel_below_preview(qt_app):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    controls = (
+        window.play_button,
+        window.seek_back_button,
+        window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
+        window.speed_combo,
+    )
+
+    assert window.video_controls_panel.isVisible()
+    assert window.video_widget.geometry().bottom() + 8 < (
+        window.video_controls_panel.geometry().top()
+    )
+    assert window.timeline_slider.parentWidget() is window.video_controls_panel
+    assert window.timeline_slider.minimumHeight() >= 28
+    assert all(
+        control.parentWidget() is window.video_controls_panel for control in controls
     )
 
 

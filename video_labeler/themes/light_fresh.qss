@@ -348,3 +348,9 @@ QGraphicsView#videoSurface::viewport {
     border: 1px solid #DCDFE6;
     border-radius: 6px;
 }
+
+QWidget#videoControlsPanel {
+    background: #FFFFFF;
+    border: 1px solid #DCDFE6;
+    border-radius: 6px;
+}
