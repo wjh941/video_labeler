@@ -1975,6 +1975,7 @@ def test_page_scroll_keeps_video_and_annotation_in_top_workspace(
     qt_app.processEvents()
 
     assert isinstance(window.main_content_scroll, QScrollArea)
+    assert window.main_content_scroll.verticalScrollBar().maximum() > 0
     assert window.main_content_scroll.widget() is window.workspace_content
     layout = window.workspace_row.layout()
     assert layout.itemAt(0).widget() is window.video_panel
