@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from video_labeler.models import ClipRecord
+from video_labeler.models import BEHAVIOR_LABELS, ClipRecord
+from video_labeler.naming import normalize_label_token
 
 
 PROJECT_VERSION = 1
@@ -31,6 +32,7 @@ class LabelProject:
     videos: list[ProjectVideo] = field(default_factory=list)
     active_video_id: str | None = None
     global_settings: dict[str, str] = field(default_factory=dict)
+    custom_behavior_tags: list[str] = field(default_factory=list)
 
 
 def new_project() -> LabelProject:
@@ -69,6 +71,7 @@ def project_to_dict(project: LabelProject) -> dict[str, Any]:
         "version": PROJECT_VERSION,
         "active_video_id": project.active_video_id,
         "global_settings": dict(project.global_settings),
+        "custom_behavior_tags": list(project.custom_behavior_tags),
         "videos": videos,
     }
     return _validated_document(document)
@@ -88,6 +91,7 @@ def project_from_dict(document: Any) -> LabelProject:
         videos=videos,
         active_video_id=validated["active_video_id"],
         global_settings=validated["global_settings"],
+        custom_behavior_tags=validated["custom_behavior_tags"],
     )
 
 
@@ -174,7 +178,9 @@ def _validated_document(document: Any) -> dict[str, Any]:
         raise ValueError("project root must be an object")
     if not _is_int(document.get("version")) or document["version"] != PROJECT_VERSION:
         raise ValueError(f"project version must be {PROJECT_VERSION}")
-    if set(document) != {"version", "active_video_id", "global_settings", "videos"}:
+    legacy_keys = {"version", "active_video_id", "global_settings", "videos"}
+    current_keys = {*legacy_keys, "custom_behavior_tags"}
+    if set(document) not in (legacy_keys, current_keys):
         raise ValueError("project keys are invalid")
 
     videos = document["videos"]
@@ -185,6 +191,9 @@ def _validated_document(document: Any) -> dict[str, Any]:
         for key, value in document["global_settings"].items()
     ):
         raise ValueError("global_settings must contain string keys and values")
+    custom_behavior_tags = _validated_custom_behavior_tags(
+        document.get("custom_behavior_tags", [])
+    )
 
     validated_videos = [_validated_video(video) for video in videos]
     ids = [video["id"] for video in validated_videos]
@@ -202,8 +211,28 @@ def _validated_document(document: Any) -> dict[str, Any]:
         "version": PROJECT_VERSION,
         "active_video_id": active_video_id,
         "global_settings": dict(document["global_settings"]),
+        "custom_behavior_tags": custom_behavior_tags,
         "videos": validated_videos,
     }
+
+
+def _validated_custom_behavior_tags(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("custom behavior tags must be a list")
+
+    normalized_tags = []
+    seen = set()
+    for tag in value:
+        if not isinstance(tag, str):
+            raise ValueError("custom behavior tags must contain strings")
+        normalized = normalize_label_token(tag, "custom behavior tag")
+        if normalized in BEHAVIOR_LABELS:
+            raise ValueError("custom behavior tag cannot duplicate a built-in label")
+        if normalized in seen:
+            raise ValueError("custom behavior tags must not contain duplicates")
+        seen.add(normalized)
+        normalized_tags.append(normalized)
+    return normalized_tags
 
 
 def _validated_video(document: Any) -> dict[str, Any]:

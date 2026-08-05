@@ -42,6 +42,32 @@ def test_project_round_trip_preserves_absolute_paths_segments_and_settings(tmp_p
     assert loaded.global_settings == project.global_settings
 
 
+def test_project_round_trip_preserves_custom_behavior_tags(tmp_path):
+    from video_labeler.project_io import load_project, new_project, save_project
+
+    project = new_project()
+    project.custom_behavior_tags = ["vehicle_idle", "delivery_dropoff"]
+
+    target = save_project(tmp_path / "work.labelproj", project)
+
+    assert load_project(target).custom_behavior_tags == [
+        "vehicle_idle",
+        "delivery_dropoff",
+    ]
+
+
+def test_legacy_project_without_custom_behavior_tags_loads_an_empty_list(tmp_path):
+    from video_labeler.project_io import load_project
+
+    target = tmp_path / "legacy.labelproj"
+    target.write_text(
+        '{"version":1,"active_video_id":null,"global_settings":{},"videos":[]}',
+        encoding="utf-8",
+    )
+
+    assert load_project(target).custom_behavior_tags == []
+
+
 def test_save_normalizes_extension_without_changing_existing_backup_filename(tmp_path):
     from video_labeler.project_io import new_project, save_project
 
@@ -143,3 +169,29 @@ def test_project_loader_rejects_invalid_document_shapes(document, message):
 
     with pytest.raises(ValueError, match=message):
         project_from_dict(document)
+
+
+@pytest.mark.parametrize(
+    "custom_behavior_tags, message",
+    [
+        ("delivery_dropoff", "custom"),
+        (["delivery dropoff"], "custom"),
+        (["delivery_dropoff", "delivery_dropoff"], "duplicate"),
+        (["dog_out"], "built-in"),
+    ],
+)
+def test_project_loader_rejects_invalid_custom_behavior_tag_library(
+    custom_behavior_tags, message
+):
+    from video_labeler.project_io import project_from_dict
+
+    with pytest.raises(ValueError, match=message):
+        project_from_dict(
+            {
+                "version": 1,
+                "active_video_id": None,
+                "global_settings": {},
+                "custom_behavior_tags": custom_behavior_tags,
+                "videos": [],
+            }
+        )

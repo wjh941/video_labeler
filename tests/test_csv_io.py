@@ -87,6 +87,26 @@ def test_read_clip_csv_restores_custom_filename_labels(tmp_path):
     assert record.sequence == 7
 
 
+def test_read_clip_csv_restores_unknown_custom_behavior_tags(tmp_path):
+    _require_csv_api()
+    csv_path = tmp_path / "custom-behavior-clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "cam02.mp4,00:00:02.500,00:00:04.000,"
+            "20260729-cam02_panorama-delivery_dropoff-pos-daytime-007.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+
+    record = read_clip_csv(csv_path)[0]
+
+    assert record.behaviors == ("delivery_dropoff",)
+    assert record.polarity == "pos"
+    assert record.lighting == "daytime"
+    assert record.sequence == 7
+
+
 def test_read_clip_csv_rejects_missing_required_headers(tmp_path):
     _require_csv_api()
     csv_path = tmp_path / "invalid.csv"

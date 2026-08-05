@@ -57,6 +57,26 @@ def test_parse_filename_restores_standard_fields():
     assert parsed.sequence == 21
 
 
+def test_build_and_parse_filename_accept_custom_behavior_tags():
+    metadata = ProjectMetadata(date="20260729", camera="cam02", view="panorama")
+
+    filename = build_filename(
+        metadata,
+        ("delivery_dropoff", "vehicle_idle"),
+        "pos",
+        "daytime",
+        1,
+    )
+
+    assert filename == (
+        "20260729-cam02_panorama-delivery_dropoff+vehicle_idle-"
+        "pos-daytime-001.mp4"
+    )
+    parsed = parse_filename(filename)
+    assert parsed is not None
+    assert parsed.behaviors == ("delivery_dropoff", "vehicle_idle")
+
+
 def test_indoor_is_a_builtin_view_option():
     assert "indoor" in VIEW_TYPES
 

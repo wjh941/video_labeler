@@ -2,7 +2,6 @@ from dataclasses import dataclass
 import re
 
 from .models import (
-    BEHAVIOR_LABELS,
     ProjectMetadata,
 )
 
@@ -64,8 +63,10 @@ def _validate_labels(
 ) -> tuple[str, str]:
     if not behaviors:
         raise ValueError("at least one behavior label is required")
-    if any(behavior not in BEHAVIOR_LABELS for behavior in behaviors):
-        raise ValueError("unknown behavior label")
+    for behavior in behaviors:
+        if not isinstance(behavior, str):
+            raise ValueError("behavior label must be a string")
+        normalize_label_token(behavior, "behavior label")
     if sequence < 1:
         raise ValueError("sequence must be at least 1")
     return (
