@@ -1891,9 +1891,12 @@ class MainWindow(QMainWindow):
             return
 
         selected = self.selected_behaviors()
+        start_seconds = self.start_spin.value()
+        end_seconds = self.end_spin.value()
         self.project.custom_behavior_tags.append(normalized)
         self.custom_behavior_tag_edit.clear()
         self._rebuild_behavior_controls(selected)
+        self.set_clip_range(start_seconds, end_seconds)
         self._mark_project_dirty()
 
     def _register_imported_behavior_tags(

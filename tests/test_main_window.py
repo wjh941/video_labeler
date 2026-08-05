@@ -1767,6 +1767,34 @@ def test_add_custom_behavior_tag_registers_project_data_and_preserves_fixed_fiel
     assert window.lighting_combo.currentText() == "night_full_color"
 
 
+def test_adding_custom_behavior_tag_partially_refreshes_editor_fields(
+    qt_app, monkeypatch
+):
+    window = MainWindow()
+    window.set_clip_range(3.0, 5.0)
+    window.polarity_combo.setCurrentText("neg")
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.behaviors_group.setChecked(False)
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+
+    refreshed_ranges = []
+    original_set_clip_range = window.set_clip_range
+
+    def capture_range_refresh(start_seconds: float, end_seconds: float) -> None:
+        refreshed_ranges.append((start_seconds, end_seconds))
+        original_set_clip_range(start_seconds, end_seconds)
+
+    monkeypatch.setattr(window, "set_clip_range", capture_range_refresh)
+
+    window.add_custom_behavior_tag()
+
+    assert refreshed_ranges == [(3.0, 5.0)]
+    assert "delivery_dropoff" in window.behavior_checks
+    assert window.behaviors_group.isChecked() is False
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+
+
 def test_loading_project_restores_custom_behavior_tag_buttons(qt_app, tmp_path):
     project_path = tmp_path / "work.labelproj"
     window = MainWindow()
