@@ -1742,6 +1742,134 @@ def test_import_csv_registers_custom_metadata_values(qt_app, tmp_path, monkeypat
     assert window.lighting_combo.findText("night_red") >= 0
 
 
+def test_add_custom_behavior_tag_registers_project_data_and_preserves_fixed_fields(
+    qt_app,
+):
+    window = MainWindow()
+    window.set_clip_range(3.0, 5.0)
+    window.polarity_combo.setCurrentText("neg")
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.custom_behavior_tag_edit.setText(" delivery_dropoff ")
+
+    window.add_custom_behavior_tag()
+
+    assert window.project.custom_behavior_tags == ["delivery_dropoff"]
+    assert "delivery_dropoff" in window.behavior_checks
+    assert window.behavior_checks["delivery_dropoff"].isChecked() is False
+    assert window.start_spin.value() == pytest.approx(3.0)
+    assert window.end_spin.value() == pytest.approx(5.0)
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+
+
+def test_loading_project_restores_custom_behavior_tag_buttons(qt_app, tmp_path):
+    project_path = tmp_path / "work.labelproj"
+    window = MainWindow()
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+    window.add_custom_behavior_tag()
+    window._project_path = project_path
+
+    window.save_project()
+
+    restored = MainWindow()
+    assert restored._load_project_path(project_path)
+    assert restored.project.custom_behavior_tags == ["delivery_dropoff"]
+    assert "delivery_dropoff" in restored.behavior_checks
+
+
+def test_import_csv_registers_unknown_behavior_tag_in_active_project(
+    qt_app, tmp_path, monkeypatch
+):
+    csv_path = tmp_path / "custom-behavior.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "cam02.mp4,00:00:01.000,00:00:02.000,"
+            "20260729-cam02_panorama-delivery_dropoff-pos-daytime-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+    window = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(csv_path), "CSV files (*.csv)")),
+    )
+
+    window.import_csv()
+
+    assert window.project.custom_behavior_tags == ["delivery_dropoff"]
+    assert "delivery_dropoff" in window.behavior_checks
+    assert window.records[0].behaviors == ("delivery_dropoff",)
+
+
+def test_removing_custom_tag_keeps_selected_record_data_as_historical_tag(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+    window.add_custom_behavior_tag()
+    window.set_clip_range(1.0, 2.0)
+    window.behavior_checks["delivery_dropoff"].setChecked(True)
+    window.add_or_update_clip()
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+
+    window._remove_custom_behavior_tag("delivery_dropoff")
+
+    assert window.project.custom_behavior_tags == []
+    assert window.records[0].behaviors == ("delivery_dropoff",)
+    assert "delivery_dropoff" not in window.behavior_checks
+    assert window.historical_behavior_tags == ("delivery_dropoff",)
+    assert not window.historical_tag_labels["delivery_dropoff"].isEnabled()
+    assert window.historical_tag_labels["delivery_dropoff"].toolTip().startswith(
+        "[Historical Tag]"
+    )
+    assert window.selected_behaviors() == ("delivery_dropoff",)
+
+    window.set_clip_range(1.0, 3.0)
+    window.add_or_update_clip()
+
+    assert window.records[0].behaviors == ("delivery_dropoff",)
+
+
+def test_readding_historical_custom_tag_restores_an_interactive_selected_tag(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+    window.add_custom_behavior_tag()
+    window.set_clip_range(1.0, 2.0)
+    window.behavior_checks["delivery_dropoff"].setChecked(True)
+    window.add_or_update_clip()
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+    window._remove_custom_behavior_tag("delivery_dropoff")
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+
+    window.add_custom_behavior_tag()
+
+    assert "delivery_dropoff" in window.behavior_checks
+    assert window.behavior_checks["delivery_dropoff"].isChecked()
+    assert "delivery_dropoff" not in window.historical_tag_labels
+
+
 def test_selecting_custom_metadata_record_restores_all_metadata_combos(qt_app):
     window = MainWindow()
     window.records = [

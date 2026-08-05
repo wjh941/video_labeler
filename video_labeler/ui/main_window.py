@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from PySide6.QtCore import (
     Property,
     QSignalBlocker,
     QSizeF,
+    Signal,
     QTimer,
     Qt,
     QUrl,
@@ -59,6 +60,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -229,6 +231,33 @@ class CollapsibleGroupBox(QGroupBox):
         painter.drawLine(3, 0, -3, 5)
 
 
+class RemovableBehaviorCheckBox(QCheckBox):
+    removeRequested = Signal(str)
+
+    def __init__(self, tag: str, parent: QWidget | None = None) -> None:
+        super().__init__(tag, parent)
+        self.setObjectName("customBehaviorTag")
+        self._remove_button = QToolButton(self)
+        self._remove_button.setText("x")
+        self._remove_button.setObjectName("customTagDeleteButton")
+        self._remove_button.setAccessibleName("删除自定义标签")
+        self._remove_button.setToolTip("删除自定义标签")
+        self._remove_button.setAutoRaise(True)
+        self._remove_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._remove_button.clicked.connect(
+            lambda: self.removeRequested.emit(self.text())
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        button_size = self._remove_button.sizeHint()
+        self._remove_button.resize(button_size)
+        self._remove_button.move(
+            max(0, self.width() - button_size.width() - 3),
+            2,
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -256,6 +285,8 @@ class MainWindow(QMainWindow):
             QPushButton, QPropertyAnimation
         ] = {}
         self._editor_splitter_stacked = False
+        self.historical_behavior_tags: tuple[str, ...] = ()
+        self.historical_tag_labels: dict[str, QLabel] = {}
 
         self.setWindowTitle("视频片段标注工具")
         self.setMinimumSize(1120, 720)
@@ -750,14 +781,14 @@ class MainWindow(QMainWindow):
 
         behaviors_layout = QVBoxLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
+        self.custom_behavior_tag_edit = QLineEdit()
+        self.custom_behavior_tag_edit.setPlaceholderText("输入英文自定义行为标签")
+        self.add_custom_behavior_tag_button = QPushButton("添加")
+        self.add_custom_behavior_tag_button.setObjectName("secondaryButton")
         behaviors_layout.addWidget(self.behavior_checks_container)
         self.behaviors_group.set_content(self.behavior_checks_container)
 
-        for behavior in BEHAVIOR_LABELS:
-            checkbox = QCheckBox(behavior)
-            checkbox.setObjectName("behaviorTag")
-            self.behavior_checks[behavior] = checkbox
-        self._reflow_behavior_checks()
+        self._rebuild_behavior_controls()
         layout.addWidget(self.behaviors_group)
 
         labels_form = QFormLayout()
@@ -788,26 +819,97 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.filename_preview)
         return group
 
+    def _available_behavior_tags(self) -> tuple[str, ...]:
+        return (*BEHAVIOR_LABELS, *self.project.custom_behavior_tags)
+
+    def _rebuild_behavior_controls(
+        self,
+        selected: Collection[str] | None = None,
+    ) -> None:
+        selected_tags = (
+            tuple(selected) if selected is not None else self.selected_behaviors()
+        )
+        available_tags = self._available_behavior_tags()
+        available_set = set(available_tags)
+        self.historical_behavior_tags = tuple(
+            dict.fromkeys(
+                behavior
+                for behavior in selected_tags
+                if behavior not in available_set
+            )
+        )
+        self.behavior_checks.clear()
+        self.historical_tag_labels.clear()
+
+        for behavior in available_tags:
+            checkbox: QCheckBox
+            if behavior in BEHAVIOR_LABELS:
+                checkbox = QCheckBox(behavior)
+                checkbox.setObjectName("behaviorTag")
+            else:
+                checkbox = RemovableBehaviorCheckBox(behavior)
+                checkbox.removeRequested.connect(self._remove_custom_behavior_tag)
+            checkbox.setChecked(behavior in selected_tags)
+            checkbox.toggled.connect(self._update_filename_preview)
+            self.behavior_checks[behavior] = checkbox
+
+        for behavior in self.historical_behavior_tags:
+            label = QLabel(behavior)
+            label.setObjectName("historicalBehaviorTag")
+            label.setEnabled(False)
+            label.setToolTip(
+                "[Historical Tag] This tag has been removed from tag library, "
+                "data remains inside this segment, cannot reuse via button"
+            )
+            self.historical_tag_labels[behavior] = label
+
+        self._reflow_behavior_checks()
+        if hasattr(self, "behavior_filter_combo"):
+            self._sync_filter_options()
+
+    def _behavior_grid_widgets(self) -> list[QWidget]:
+        return [
+            *self.behavior_checks.values(),
+            *self.historical_tag_labels.values(),
+        ]
+
     def _reflow_behavior_checks(self) -> None:
         self._behavior_reflow_pending = False
         available_width = self.behavior_checks_container.width()
         if available_width <= 0:
             available_width = self.behavior_checks_container.sizeHint().width()
-        columns, column_widths = self._behavior_layout_for_width(available_width)
+        widgets = self._behavior_grid_widgets()
+        columns, column_widths = self._behavior_layout_for_width(
+            available_width, widgets
+        )
         self.behavior_columns = columns
-        for checkbox in self.behavior_checks.values():
-            checkbox.setSizePolicy(
+        for widget in widgets:
+            widget.setSizePolicy(
                 QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
             )
         while self.behavior_checks_layout.count():
-            self.behavior_checks_layout.takeAt(0)
+            item = self.behavior_checks_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().setParent(None)
         for column in range(3):
             self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
             self.behavior_checks_layout.setColumnStretch(column, 0)
-        rows = (len(self.behavior_checks) + columns - 1) // columns
-        for index, checkbox in enumerate(self.behavior_checks.values()):
+        for index, widget in enumerate(widgets):
             row, column = divmod(index, columns)
-            self.behavior_checks_layout.addWidget(checkbox, row, column)
+            self.behavior_checks_layout.addWidget(widget, row, column)
+        tag_rows = (len(widgets) + columns - 1) // columns
+        self.behavior_checks_layout.addWidget(
+            self.custom_behavior_tag_edit,
+            tag_rows,
+            0,
+            1,
+            max(1, columns - 1),
+        )
+        self.behavior_checks_layout.addWidget(
+            self.add_custom_behavior_tag_button,
+            tag_rows,
+            columns - 1,
+        )
         for column in range(columns):
             self.behavior_checks_layout.setColumnMinimumWidth(
                 column, column_widths[column]
@@ -818,10 +920,14 @@ class MainWindow(QMainWindow):
         if self.behaviors_group.isChecked():
             QTimer.singleShot(0, self._restore_behavior_content_height)
 
-    def _behavior_layout_for_width(self, available_width: int) -> tuple[int, list[int]]:
-        checks = list(self.behavior_checks.values())
-        two_column_widths = self._behavior_column_widths(checks, 2)
-        three_column_widths = self._behavior_column_widths(checks, 3)
+    def _behavior_layout_for_width(
+        self,
+        available_width: int,
+        widgets: Sequence[QWidget] | None = None,
+    ) -> tuple[int, list[int]]:
+        grid_widgets = list(widgets or self._behavior_grid_widgets())
+        two_column_widths = self._behavior_column_widths(grid_widgets, 2)
+        three_column_widths = self._behavior_column_widths(grid_widgets, 3)
         three_column_width = self._behavior_grid_minimum_width(
             three_column_widths
         )
@@ -832,7 +938,7 @@ class MainWindow(QMainWindow):
     def _set_annotation_minimum_width(self) -> None:
         """Keep the non-scrollable tag grid wide enough for two full columns."""
         two_column_widths = self._behavior_column_widths(
-            list(self.behavior_checks.values()), 2
+            self._behavior_grid_widgets(), 2
         )
         self.behavior_checks_container.setMinimumWidth(
             self._behavior_grid_minimum_width(two_column_widths)
@@ -851,7 +957,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _behavior_column_widths(
-        checks: list[QCheckBox], columns: int
+        checks: Sequence[QWidget], columns: int
     ) -> list[int]:
         column_widths = [0] * columns
         for index, checkbox in enumerate(checks):
@@ -871,8 +977,8 @@ class MainWindow(QMainWindow):
     def _release_behavior_width_constraints(self) -> None:
         for column in range(3):
             self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
-        for checkbox in self.behavior_checks.values():
-            checkbox.setSizePolicy(
+        for widget in self._behavior_grid_widgets():
+            widget.setSizePolicy(
                 QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
             )
         self.behavior_checks_container.updateGeometry()
@@ -1221,8 +1327,12 @@ class MainWindow(QMainWindow):
         self.polarity_combo.currentTextChanged.connect(self._update_filename_preview)
         self.lighting_combo.currentTextChanged.connect(self._update_filename_preview)
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
-        for checkbox in self.behavior_checks.values():
-            checkbox.toggled.connect(self._update_filename_preview)
+        self.add_custom_behavior_tag_button.clicked.connect(
+            self.add_custom_behavior_tag
+        )
+        self.custom_behavior_tag_edit.returnPressed.connect(
+            self.add_custom_behavior_tag
+        )
 
         self.add_button.clicked.connect(self.add_or_update_clip)
         self.remove_button.clicked.connect(self.remove_selected_clip)
@@ -1498,6 +1608,8 @@ class MainWindow(QMainWindow):
         self._project_path = Path(path)
         self._project_dirty = False
         self._active_video_histories = {}
+        self.historical_behavior_tags = ()
+        self._rebuild_behavior_controls(())
         settings = project.global_settings
         self.date_edit.setText(settings.get("date", self.date_edit.text()))
         self.camera_edit.setText(settings.get("camera", self.camera_edit.text()))
@@ -1569,6 +1681,7 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as error:
             self._show_error("无法导入 CSV", f"导入 CSV 失败：{error}")
             return
+        self._register_imported_behavior_tags(imported_records)
 
         csv_path = Path(filename)
         active_video = self._active_project_video()
@@ -1698,11 +1811,90 @@ class MainWindow(QMainWindow):
         self.end_spin.setValue(end_seconds)
 
     def selected_behaviors(self) -> tuple[str, ...]:
-        return tuple(
+        selected = [
             behavior
             for behavior, checkbox in self.behavior_checks.items()
             if checkbox.isChecked()
+        ]
+        return tuple(
+            dict.fromkeys((*selected, *self.historical_behavior_tags))
         )
+
+    def add_custom_behavior_tag(self) -> None:
+        value = self.custom_behavior_tag_edit.text()
+        try:
+            normalized = normalize_label_token(value, "行为标签")
+        except ValueError as error:
+            self._show_error("自定义标签无效", str(error))
+            return
+        if normalized in BEHAVIOR_LABELS:
+            self._show_error("自定义标签无效", "内置行为标签无需重复添加。")
+            return
+        if normalized in self.project.custom_behavior_tags:
+            self._show_error("自定义标签无效", "该自定义行为标签已存在。")
+            return
+
+        selected = self.selected_behaviors()
+        self.project.custom_behavior_tags.append(normalized)
+        self.custom_behavior_tag_edit.clear()
+        self._rebuild_behavior_controls(selected)
+        self._mark_project_dirty()
+
+    def _register_imported_behavior_tags(
+        self,
+        records: Sequence[ClipRecord],
+    ) -> bool:
+        known = set(self._available_behavior_tags())
+        additions = []
+        for record in records:
+            for behavior in record.behaviors:
+                if behavior not in known:
+                    additions.append(behavior)
+                    known.add(behavior)
+        if not additions:
+            return False
+
+        selected = self.selected_behaviors()
+        self.project.custom_behavior_tags.extend(additions)
+        self._rebuild_behavior_controls(selected)
+        return True
+
+    def _remove_custom_behavior_tag(self, tag: str) -> None:
+        if tag not in self.project.custom_behavior_tags:
+            return
+
+        is_referenced = any(
+            tag in record.behaviors
+            for video in self.project.videos
+            for record in video.segments
+        )
+        if is_referenced:
+            answer = QMessageBox.question(
+                self,
+                "删除自定义标签",
+                (
+                    f"“{tag}” 已被历史片段使用。删除后仅移除可选标签按钮，"
+                    "历史片段中的标签数据会保留。是否继续？"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        if self._editing_index is not None and 0 <= self._editing_index < len(
+            self.records
+        ):
+            selected = self.records[self._editing_index].behaviors
+        else:
+            selected = tuple(
+                behavior
+                for behavior in self.selected_behaviors()
+                if behavior != tag
+            )
+        self.project.custom_behavior_tags.remove(tag)
+        self._rebuild_behavior_controls(selected)
+        self._mark_project_dirty()
 
     def add_or_update_clip(self) -> None:
         try:
@@ -1786,8 +1978,8 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self.start_spin.setValue(0)
         self.end_spin.setValue(0)
-        for checkbox in self.behavior_checks.values():
-            checkbox.setChecked(False)
+        self.historical_behavior_tags = ()
+        self._rebuild_behavior_controls(())
         self.polarity_combo.setCurrentIndex(0)
         self.lighting_combo.setCurrentIndex(0)
         self.sequence_spin.setValue(
@@ -1800,8 +1992,8 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self.add_button.setText("添加片段")
         self.set_clip_range(saved_end_seconds, saved_end_seconds)
-        for checkbox in self.behavior_checks.values():
-            checkbox.setChecked(False)
+        self.historical_behavior_tags = ()
+        self._rebuild_behavior_controls(())
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -1966,6 +2158,17 @@ class MainWindow(QMainWindow):
         self._apply_table_filters()
 
     def _sync_filter_options(self) -> None:
+        current_behavior = self.behavior_filter_combo.currentData()
+        with QSignalBlocker(self.behavior_filter_combo):
+            self.behavior_filter_combo.clear()
+            self.behavior_filter_combo.addItem("全部行为", None)
+            for behavior in self._available_behavior_tags():
+                self.behavior_filter_combo.addItem(behavior, behavior)
+            behavior_index = self.behavior_filter_combo.findData(current_behavior)
+            self.behavior_filter_combo.setCurrentIndex(
+                behavior_index if behavior_index >= 0 else 0
+            )
+
         filter_options = (
             (
                 self.polarity_filter_combo,
@@ -2058,8 +2261,7 @@ class MainWindow(QMainWindow):
         self.start_spin.setValue(record.start_seconds)
         self.end_spin.setValue(record.end_seconds)
         self.sequence_spin.setValue(max(1, record.sequence))
-        for behavior, checkbox in self.behavior_checks.items():
-            checkbox.setChecked(behavior in record.behaviors)
+        self._rebuild_behavior_controls(record.behaviors)
         parsed = parse_filename(record.output)
         if parsed is not None:
             self._restore_parsed_metadata(parsed)
@@ -2176,7 +2378,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         apply_behaviors = QCheckBox("应用此字段：行为标签")
         batch_behavior_checks = {
-            behavior: QCheckBox(behavior) for behavior in BEHAVIOR_LABELS
+            behavior: QCheckBox(behavior)
+            for behavior in self._available_behavior_tags()
         }
         apply_polarity = QCheckBox("应用此字段：正负例")
         polarity_combo = _copy_data_combo(self.polarity_combo)
