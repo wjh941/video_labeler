@@ -1976,10 +1976,40 @@ def test_page_scroll_keeps_video_and_annotation_in_top_workspace(
 
     assert isinstance(window.main_content_scroll, QScrollArea)
     assert window.main_content_scroll.verticalScrollBar().maximum() > 0
+    assert window.main_content_scroll.horizontalScrollBar().maximum() == 0
     assert window.main_content_scroll.widget() is window.workspace_content
     layout = window.workspace_row.layout()
     assert layout.itemAt(0).widget() is window.video_panel
     assert layout.itemAt(1).widget() is window.annotation_workspace
+    assert window.workspace_row.contentsRect().contains(
+        window.video_panel.geometry()
+    )
+    assert window.workspace_row.contentsRect().contains(
+        window.annotation_workspace.geometry()
+    )
+    assert window.annotation_workspace.contentsRect().contains(
+        window.annotation_panel.geometry()
+    )
+    annotation_rect = window.annotation_panel.contentsRect()
+    annotation_controls = (
+        window.add_button,
+        window.remove_button,
+        window.undo_button,
+        window.redo_button,
+        window.clear_button,
+        window.behavior_tag_combo,
+    )
+    assert all(
+        annotation_rect.contains(control.mapTo(window.annotation_panel, QPoint()))
+        and annotation_rect.contains(
+            control.mapTo(
+                window.annotation_panel,
+                QPoint(control.width() - 1, control.height() - 1),
+            )
+        )
+        for control in annotation_controls
+    )
+    assert window.task_panel.parentWidget() is window.workspace_content
     assert window.video_panel.isVisible()
     assert window.annotation_panel.isVisible()
 

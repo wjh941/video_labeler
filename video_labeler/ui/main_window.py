@@ -1251,6 +1251,7 @@ class MainWindow(QMainWindow):
             "快捷键：空格 播放/暂停，A/D 前后帧，S/E 设置起止点，Del 删除，"
             "Ctrl+Z/Y 撤销/重做，Ctrl+S 保存工程"
         )
+        self.shortcut_hint_label.setWordWrap(True)
 
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.progress_bar, stretch=1)
