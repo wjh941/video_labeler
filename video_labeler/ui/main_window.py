@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QScrollArea,
     QSlider,
     QSizePolicy,
     QSpinBox,
@@ -376,12 +377,12 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        root_layout = QVBoxLayout(self.workspace_content)
-        root_layout.setContentsMargins(14, 12, 14, 12)
-        root_layout.setSpacing(10)
+        self.page_layout = QVBoxLayout(self.workspace_content)
+        self.page_layout.setContentsMargins(14, 12, 14, 12)
+        self.page_layout.setSpacing(10)
 
         self.project_header = self._build_project_header()
-        root_layout.addWidget(self.project_header)
+        self.page_layout.addWidget(self.project_header)
 
         self.workspace_row = QWidget()
         self.workspace_row.setObjectName("workspaceRow")
@@ -416,7 +417,6 @@ class MainWindow(QMainWindow):
             self._restore_task_table_content_minimum
         )
         self.annotation_workspace_layout.addWidget(self.annotation_panel)
-        self.annotation_workspace_layout.addWidget(self.task_panel, 1)
 
         workspace_layout.addWidget(self.video_panel, 13)
         workspace_layout.addWidget(self.annotation_workspace, 12)
@@ -429,8 +429,9 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.setLayout(QVBoxLayout())
         self.task_table_dialog.finished.connect(self._restore_task_panel)
 
-        root_layout.addWidget(self.workspace_row, stretch=1)
-        root_layout.addLayout(self._build_export_status())
+        self.page_layout.addWidget(self.workspace_row)
+        self.page_layout.addWidget(self.task_panel)
+        self.page_layout.addLayout(self._build_export_status())
 
         for card in (
             self.project_header,
@@ -441,7 +442,12 @@ class MainWindow(QMainWindow):
             self._apply_card_shadow(card)
         self._install_presentation_button_effects()
 
-        self.setCentralWidget(self.workspace_content)
+        self.main_content_scroll = QScrollArea()
+        self.main_content_scroll.setObjectName("mainContentScroll")
+        self.main_content_scroll.setWidgetResizable(True)
+        self.main_content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.main_content_scroll.setWidget(self.workspace_content)
+        self.setCentralWidget(self.main_content_scroll)
 
     def _apply_card_shadow(self, widget: QWidget) -> None:
         effect = QGraphicsDropShadowEffect(widget)
@@ -1111,6 +1117,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Expanding,
         )
+        self.task_table.setMinimumHeight(200)
         self.task_table.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
@@ -1210,6 +1217,7 @@ class MainWindow(QMainWindow):
             self.task_table_dialog.activateWindow()
             return
 
+        self.page_layout.removeWidget(self.task_panel)
         self.task_panel.setParent(None)
         dialog_layout = self.task_table_dialog.layout()
         assert dialog_layout is not None
@@ -1219,14 +1227,17 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.activateWindow()
 
     def _restore_task_panel(self, *_args: object) -> None:
-        if self.task_panel.parentWidget() is self.annotation_workspace:
+        if self.task_panel.parentWidget() is self.workspace_content:
             return
 
         dialog_layout = self.task_table_dialog.layout()
         if dialog_layout is not None:
             dialog_layout.removeWidget(self.task_panel)
         self.task_panel.setParent(None)
-        self.annotation_workspace_layout.addWidget(self.task_panel, 1)
+        self.page_layout.insertWidget(
+            self.page_layout.count() - 1,
+            self.task_panel,
+        )
         self.task_panel.show()
 
     def _build_export_status(self) -> QHBoxLayout:
