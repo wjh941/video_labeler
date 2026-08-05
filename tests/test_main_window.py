@@ -2268,7 +2268,7 @@ def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
         window.speed_combo,
     )
 
-    assert window.video_widget.minimumHeight() >= 300
+    assert window.video_widget.minimumHeight() >= 280
     assert preview_bottom + 14 < timeline_top
     assert all(
         timeline_bottom + 6

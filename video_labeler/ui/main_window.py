@@ -53,11 +53,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
-    QScrollArea,
     QSlider,
     QSizePolicy,
     QSpinBox,
-    QSplitter,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -357,7 +355,6 @@ class MainWindow(QMainWindow):
         self._button_hover_animations: dict[
             QPushButton, QPropertyAnimation
         ] = {}
-        self._editor_splitter_stacked = False
         self.historical_behavior_tags: tuple[str, ...] = ()
         self.historical_tag_labels: dict[str, QLabel] = {}
 
@@ -372,74 +369,54 @@ class MainWindow(QMainWindow):
         self._update_history_controls()
 
     def _build_ui(self) -> None:
-        root = QWidget(self)
-        root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        self.main_content_scroll = QScrollArea()
-        self.main_content_scroll.setObjectName("mainContentScroll")
-        self.main_content_scroll.setWidgetResizable(True)
-        self.main_content_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self.main_content_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.main_content_viewport = self.main_content_scroll.viewport()
-        self.main_content_viewport.installEventFilter(self)
-
         self.workspace_content = QWidget()
         self.workspace_content.setObjectName("workspaceContent")
         self.workspace_content.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Expanding,
         )
-        content_layout = QVBoxLayout(self.workspace_content)
-        content_layout.setContentsMargins(20, 18, 20, 18)
-        content_layout.setSpacing(16)
+        root_layout = QVBoxLayout(self.workspace_content)
+        root_layout.setContentsMargins(14, 12, 14, 12)
+        root_layout.setSpacing(10)
 
         self.project_header = self._build_project_header()
-        content_layout.addWidget(self.project_header)
+        root_layout.addWidget(self.project_header)
 
-        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.editor_splitter.setChildrenCollapsible(False)
+        self.workspace_row = QWidget()
+        self.workspace_row.setObjectName("workspaceRow")
+        workspace_layout = QHBoxLayout(self.workspace_row)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(12)
+
         self.video_panel = self._build_video_panel()
-        self.editor_splitter.addWidget(self.video_panel)
+        self.video_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        self.annotation_workspace = QWidget()
+        self.annotation_workspace.setObjectName("annotationWorkspace")
+        self.annotation_workspace.setMinimumWidth(420)
+        self.annotation_workspace.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.annotation_workspace_layout = QVBoxLayout(
+            self.annotation_workspace
+        )
+        self.annotation_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        self.annotation_workspace_layout.setSpacing(10)
 
         self.annotation_panel = self._build_clip_editor()
         self.annotation_panel.setObjectName("annotationCard")
-        self.annotation_scroll = QScrollArea()
-        self.annotation_scroll.setWidget(self.annotation_panel)
-        self.annotation_scroll.setWidgetResizable(True)
-        self.annotation_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self.annotation_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.annotation_scroll.installEventFilter(self)
-        self.annotation_scroll.setMinimumHeight(
-            self.annotation_panel.minimumSizeHint().height()
-            + (self.annotation_scroll.frameWidth() * 2)
-        )
         self.task_panel = self._build_task_table()
         self.task_panel.setObjectName("taskCard")
         self.task_panel.setMinimumHeight(320)
-        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.workspace_splitter.setChildrenCollapsible(False)
-        self.workspace_splitter.addWidget(self.annotation_scroll)
-        self.workspace_splitter.addWidget(self.task_panel)
-        self.workspace_splitter.setMinimumWidth(420)
-        self.workspace_splitter.setSizes([470, 360])
-        self.workspace_splitter.setStretchFactor(0, 3)
-        self.workspace_splitter.setStretchFactor(1, 2)
-        self.editor_splitter.addWidget(self.workspace_splitter)
-        self._set_annotation_minimum_width()
-        self.editor_splitter.setSizes([550, 450])
-        self.editor_splitter.setStretchFactor(0, 11)
-        self.editor_splitter.setStretchFactor(1, 9)
-        self.editor_splitter.setMinimumHeight(560)
+        self.annotation_workspace_layout.addWidget(self.annotation_panel)
+        self.annotation_workspace_layout.addWidget(self.task_panel, 1)
+
+        workspace_layout.addWidget(self.video_panel, 13)
+        workspace_layout.addWidget(self.annotation_workspace, 12)
 
         self.task_table_dialog = QDialog(self)
         self.task_table_dialog.setWindowTitle("片段任务")
@@ -449,8 +426,8 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.setLayout(QVBoxLayout())
         self.task_table_dialog.finished.connect(self._restore_task_panel)
 
-        content_layout.addWidget(self.editor_splitter, stretch=1)
-        content_layout.addLayout(self._build_export_status())
+        root_layout.addWidget(self.workspace_row, stretch=1)
+        root_layout.addLayout(self._build_export_status())
 
         for card in (
             self.project_header,
@@ -461,9 +438,7 @@ class MainWindow(QMainWindow):
             self._apply_card_shadow(card)
         self._install_presentation_button_effects()
 
-        self.main_content_scroll.setWidget(self.workspace_content)
-        root_layout.addWidget(self.main_content_scroll)
-        self.setCentralWidget(root)
+        self.setCentralWidget(self.workspace_content)
 
     def _apply_card_shadow(self, widget: QWidget) -> None:
         effect = QGraphicsDropShadowEffect(widget)
@@ -695,7 +670,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
 
         self.video_widget = QGraphicsView()
-        self.video_widget.setMinimumHeight(420)
+        self.video_widget.setMinimumHeight(280)
         self.video_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -1059,25 +1034,10 @@ class MainWindow(QMainWindow):
                 checkbox.setChecked(behavior in selected)
         self._update_filename_preview()
 
-    def _set_annotation_minimum_width(self) -> None:
-        """Keep the compact annotation form usable beside the video panel."""
-        self.annotation_scroll.setMinimumWidth(420)
-
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "output_folder_label"):
             self._set_output_folder_display()
-        if hasattr(self, "editor_splitter"):
-            self._update_editor_splitter_orientation()
-
-    def _update_editor_splitter_orientation(self) -> None:
-        """Keep the video and annotation workspaces side by side."""
-        if not hasattr(self, "editor_splitter"):
-            return
-        self._editor_splitter_stacked = False
-        if self.editor_splitter.orientation() != Qt.Orientation.Horizontal:
-            self.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
-            self.editor_splitter.setSizes([550, 450])
 
     def _resize_video_item(self) -> None:
         if not hasattr(self, "video_viewport"):
@@ -1100,9 +1060,7 @@ class MainWindow(QMainWindow):
                 self._animate_button_hover(watched, 0)
         if event.type() != QEvent.Type.Resize:
             return super().eventFilter(watched, event)
-        if watched is getattr(self, "main_content_viewport", None):
-            self._update_editor_splitter_orientation()
-        elif watched is getattr(self, "video_viewport", None):
+        if watched is getattr(self, "video_viewport", None):
             self._resize_video_item()
         return super().eventFilter(watched, event)
 
@@ -1229,15 +1187,14 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.activateWindow()
 
     def _restore_task_panel(self, *_args: object) -> None:
-        if self.task_panel.parentWidget() is self.workspace_splitter:
+        if self.task_panel.parentWidget() is self.annotation_workspace:
             return
 
         dialog_layout = self.task_table_dialog.layout()
         if dialog_layout is not None:
             dialog_layout.removeWidget(self.task_panel)
         self.task_panel.setParent(None)
-        self.workspace_splitter.insertWidget(1, self.task_panel)
-        self.workspace_splitter.setSizes([470, 360])
+        self.annotation_workspace_layout.addWidget(self.task_panel, 1)
         self.task_panel.show()
 
     def _build_export_status(self) -> QHBoxLayout:
@@ -1475,8 +1432,6 @@ class MainWindow(QMainWindow):
     def set_source_path(self, path: Path) -> None:
         entry = add_or_activate_video(self.project, path)
         self._bind_active_video(entry)
-        self._set_annotation_minimum_width()
-        self._update_editor_splitter_orientation()
         self._mark_project_dirty()
         self._set_status(f"已选择视频：{entry.path.name}")
 
