@@ -228,6 +228,38 @@ def test_behavior_selector_popup_contains_all_available_tags(qt_app):
     ) == "delivery_dropoff"
 
 
+@pytest.mark.parametrize("click_indicator", (False, True))
+def test_behavior_selector_click_keeps_summary_and_filename_in_sync(
+    qt_app, click_indicator
+):
+    window = MainWindow()
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.show()
+    qt_app.processEvents()
+
+    window.behavior_tag_combo.showPopup()
+    qt_app.processEvents()
+    index = window.behavior_tag_combo.model().index(0, 0)
+    rect = window.behavior_tag_combo.view().visualRect(index)
+    click_point = rect.center()
+    if click_indicator:
+        click_point.setX(rect.left() + 8)
+    QTest.mouseClick(
+        window.behavior_tag_combo.view().viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        click_point,
+    )
+    qt_app.processEvents()
+
+    assert window.behavior_tag_combo.checked_tags() == (
+        BEHAVIOR_LABELS[0],
+    )
+    assert window.behavior_tag_combo.currentText() == "已选 1 项"
+    assert BEHAVIOR_LABELS[0] in window.filename_preview.text()
+
+
 def test_main_window_uses_semantic_style_object_names(qt_app):
     window = MainWindow()
 
@@ -1584,6 +1616,27 @@ def test_custom_field_group_lists_added_tag_for_removal(qt_app):
     assert isinstance(window.custom_tags_group, CollapsibleGroupBox)
     assert window.custom_tag_library_combo.currentData() == "delivery_dropoff"
     assert window.remove_custom_behavior_tag_button.isEnabled()
+
+
+def test_adding_custom_tag_preserves_fixed_group_collapse_states(qt_app):
+    window = MainWindow()
+    window.set_clip_range(3.0, 5.0)
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.polarity_combo.setCurrentText("neg")
+    window.behaviors_group.setChecked(False)
+    window.lighting_group.setChecked(False)
+    window.polarity_group.setChecked(False)
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+
+    window.add_custom_behavior_tag()
+
+    assert window.start_spin.value() == pytest.approx(3.0)
+    assert window.end_spin.value() == pytest.approx(5.0)
+    assert window.polarity_combo.currentText() == "neg"
+    assert window.lighting_combo.currentText() == "night_full_color"
+    assert not window.behaviors_group.isChecked()
+    assert not window.lighting_group.isChecked()
+    assert not window.polarity_group.isChecked()
 
 
 def test_loading_project_restores_custom_behavior_tag_buttons(qt_app, tmp_path):

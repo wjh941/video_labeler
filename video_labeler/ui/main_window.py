@@ -242,7 +242,9 @@ class BehaviorTagComboBox(QComboBox):
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.lineEdit().setReadOnly(True)
         self.lineEdit().setPlaceholderText("请选择行为标签")
-        self.setModel(QStandardItemModel(self))
+        model = QStandardItemModel(self)
+        model.dataChanged.connect(self._on_model_data_changed)
+        self.setModel(model)
         self.view().pressed.connect(self._toggle_index)
 
     def set_tags(
@@ -293,8 +295,6 @@ class BehaviorTagComboBox(QComboBox):
         if item.checkState() == target_state:
             return
         item.setCheckState(target_state)
-        self._update_summary()
-        self.selectionChanged.emit()
 
     def _toggle_index(self, index) -> None:
         if not index.isValid():
@@ -307,6 +307,12 @@ class BehaviorTagComboBox(QComboBox):
             item.checkState() != Qt.CheckState.Checked,
         )
         QTimer.singleShot(0, self.showPopup)
+
+    def _on_model_data_changed(self, _top_left, _bottom_right, roles) -> None:
+        if roles and Qt.ItemDataRole.CheckStateRole not in roles:
+            return
+        self._update_summary()
+        self.selectionChanged.emit()
 
     def _update_summary(self) -> None:
         selected_count = len(self.checked_tags())
