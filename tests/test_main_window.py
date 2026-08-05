@@ -2162,6 +2162,34 @@ def test_horizontal_editor_splitter_uses_video_to_form_five_to_four_ratio(qt_app
     assert video_size / form_size == pytest.approx(5 / 4, rel=0.15)
 
 
+def test_importing_video_rechecks_right_panel_constraints(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    calls = []
+    original_minimum_recheck = window._set_annotation_minimum_width
+    original_splitter_recheck = window._update_editor_splitter_orientation
+
+    def record_minimum_recheck() -> None:
+        calls.append("minimum")
+        original_minimum_recheck()
+
+    def record_splitter_recheck() -> None:
+        calls.append("splitter")
+        original_splitter_recheck()
+
+    monkeypatch.setattr(
+        window, "_set_annotation_minimum_width", record_minimum_recheck
+    )
+    monkeypatch.setattr(
+        window, "_update_editor_splitter_orientation", record_splitter_recheck
+    )
+
+    window.set_source_path(tmp_path / "new-source.mp4")
+
+    assert calls == ["minimum", "splitter"]
+
+
 def test_card_workspace_uses_semantic_cards_without_overlapping_video_controls(
     qt_app,
 ):

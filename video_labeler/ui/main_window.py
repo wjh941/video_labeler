@@ -1451,6 +1451,8 @@ class MainWindow(QMainWindow):
     def set_source_path(self, path: Path) -> None:
         entry = add_or_activate_video(self.project, path)
         self._bind_active_video(entry)
+        self._set_annotation_minimum_width()
+        self._update_editor_splitter_orientation()
         self._mark_project_dirty()
         self._set_status(f"已选择视频：{entry.path.name}")
 
