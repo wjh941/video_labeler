@@ -38,8 +38,9 @@ from video_labeler.models import (
 from video_labeler.ffmpeg_service import ExportResult
 
 try:
-    from video_labeler.ui.main_window import MainWindow
+    from video_labeler.ui.main_window import CollapsibleGroupBox, MainWindow
 except ImportError:
+    CollapsibleGroupBox = None
     MainWindow = None
 
 
@@ -952,10 +953,10 @@ def test_collapsible_behavior_group_recalculates_expanded_height_after_reflow(qt
     qt_app.processEvents()
 
     window.behaviors_group.setChecked(False)
-    QTest.qWait(350)
+    _wait_for_content_animation(qt_app, window)
     window.resize(1280, 900)
     window.behaviors_group.setChecked(True)
-    QTest.qWait(350)
+    _wait_for_content_animation(qt_app, window)
     qt_app.processEvents()
 
     assert window.behavior_checks_container.maximumHeight() == 16777215
@@ -2080,6 +2081,17 @@ def test_toolbar_uses_three_semantic_action_groups(qt_app):
     assert not window.advanced_export_group.isChecked()
 
 
+def test_project_settings_card_is_expanded_and_collapsible(qt_app):
+    window = MainWindow()
+
+    assert isinstance(window.project_header, CollapsibleGroupBox)
+    assert window.project_header.isChecked()
+    assert window.project_header._content is window.project_settings_content
+    assert window.project_settings_content.isAncestorOf(
+        window.open_video_button
+    )
+
+
 def test_annotation_time_and_action_controls_share_horizontal_rows(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
@@ -2366,10 +2378,19 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
         and window.table_action_bar.contentsRect().contains(control.geometry())
         for control in table_action_controls
     )
-    assert header_rect.contains(window.import_action_group.geometry())
-    assert header_rect.contains(window.csv_action_group.geometry())
-    assert header_rect.contains(window.export_action_group.geometry())
-    assert header_rect.contains(window.settings_action_group.geometry())
+    for action_group in (
+        window.import_action_group,
+        window.csv_action_group,
+        window.export_action_group,
+        window.settings_action_group,
+    ):
+        top_left = action_group.mapTo(window.project_header, QPoint(0, 0))
+        bottom_right = action_group.mapTo(
+            window.project_header,
+            QPoint(action_group.width() - 1, action_group.height() - 1),
+        )
+        assert header_rect.contains(top_left)
+        assert header_rect.contains(bottom_right)
 
 
 def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):

@@ -443,9 +443,10 @@ class MainWindow(QMainWindow):
         animation.start()
 
     def _build_project_header(self) -> QGroupBox:
-        group = QGroupBox("项目设置")
+        group = CollapsibleGroupBox("项目设置")
         group.setObjectName("toolbarCard")
-        layout = QVBoxLayout(group)
+        self.project_settings_content = QWidget()
+        layout = QVBoxLayout(self.project_settings_content)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(12)
 
@@ -577,6 +578,10 @@ class MainWindow(QMainWindow):
         self.advanced_export_content.setVisible(False)
         self.advanced_export_group.setObjectName("inlineExportOptions")
         layout.addWidget(self.advanced_export_group)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(6, 6, 6, 6)
+        group_layout.addWidget(self.project_settings_content)
+        group.set_content(self.project_settings_content)
         self._set_output_folder_display()
         return group
 
