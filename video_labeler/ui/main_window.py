@@ -313,6 +313,8 @@ class MainWindow(QMainWindow):
         self.main_content_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
+        self.main_content_viewport = self.main_content_scroll.viewport()
+        self.main_content_viewport.installEventFilter(self)
 
         self.workspace_content = QWidget()
         self.workspace_content.setObjectName("workspaceContent")
@@ -1052,10 +1054,9 @@ class MainWindow(QMainWindow):
         """Stack the existing panels before either one can be horizontally cut."""
         if not hasattr(self, "editor_splitter"):
             return
-        available_width = max(
-            self.main_content_scroll.viewport().width(),
-            self.width(),
-        )
+        available_width = self.main_content_scroll.viewport().width()
+        if available_width <= 0:
+            available_width = self.width()
         should_stack = available_width < 1280
         if should_stack == self._editor_splitter_stacked:
             return
@@ -1092,7 +1093,9 @@ class MainWindow(QMainWindow):
                 self._animate_button_hover(watched, 0)
         if event.type() != QEvent.Type.Resize:
             return super().eventFilter(watched, event)
-        if watched is getattr(self, "annotation_scroll", None):
+        if watched is getattr(self, "main_content_viewport", None):
+            self._update_editor_splitter_orientation()
+        elif watched is getattr(self, "annotation_scroll", None):
             self._release_behavior_width_constraints()
             self._schedule_behavior_reflow()
         elif watched is getattr(self, "behavior_checks_container", None):

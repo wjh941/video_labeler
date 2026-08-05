@@ -969,6 +969,8 @@ def test_behavior_checks_reflow_after_annotation_splitter_moves(qt_app):
     window.resize(1920, 900)
     window.show()
     qt_app.processEvents()
+    window._editor_splitter_stacked = False
+    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
 
     window.editor_splitter.setSizes([620, 1200])
     _process_behavior_reflow(qt_app, window)
@@ -1054,6 +1056,8 @@ def test_behavior_checks_splitter_reflow_preserves_two_and_three_column_grid(
     window = MainWindow()
     window.resize(1920, 900)
     window.show()
+    window._editor_splitter_stacked = False
+    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
     _process_behavior_reflow(qt_app, window)
 
     three_column_threshold = _three_column_threshold(window)
@@ -2157,9 +2161,28 @@ def test_horizontal_editor_splitter_uses_video_to_form_five_to_four_ratio(qt_app
     window.show()
     qt_app.processEvents()
 
-    video_size, form_size = window.editor_splitter.sizes()
+    if window.main_content_scroll.viewport().width() < 1280:
+        assert window.editor_splitter.orientation() == Qt.Orientation.Vertical
+        return
 
+    video_size, form_size = window.editor_splitter.sizes()
+    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
     assert video_size / form_size == pytest.approx(5 / 4, rel=0.15)
+
+
+def test_editor_splitter_stacks_when_content_viewport_is_below_breakpoint(qt_app):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.main_content_scroll.viewport().width() < 1280
+    window._editor_splitter_stacked = False
+    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
+
+    window._update_editor_splitter_orientation()
+
+    assert window.editor_splitter.orientation() == Qt.Orientation.Vertical
 
 
 def test_importing_video_rechecks_right_panel_constraints(
@@ -2325,7 +2348,7 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
     assert window.editor_splitter.width() <= viewport.width()
     assert window.editor_splitter.orientation() == (
         Qt.Orientation.Vertical
-        if width < 1280
+        if viewport.width() < 1280
         else Qt.Orientation.Horizontal
     )
     assert all(
