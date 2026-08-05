@@ -1965,48 +1965,41 @@ def test_main_window_uses_a_draggable_timeline_slider(qt_app):
 
 
 @pytest.mark.parametrize(("width", "height"), ((1120, 720), (1440, 900)))
-def test_workspace_has_no_global_vertical_scroll_area(qt_app, width, height):
+def test_page_scroll_keeps_video_and_annotation_in_top_workspace(
+    qt_app, width, height, tmp_path
+):
     window = MainWindow()
     window.resize(width, height)
     window.show()
-    qt_app.processEvents()
-
-    assert not hasattr(window, "main_content_scroll")
-    assert not window.findChildren(QScrollArea)
-
-
-def test_importing_video_keeps_fixed_screen_workspace_unclipped(qt_app, tmp_path):
-    window = MainWindow()
-    window.resize(1120, 720)
-    window.show()
     window.set_source_path(tmp_path / "source.mp4")
     qt_app.processEvents()
 
-    window_rect = window.centralWidget().contentsRect()
-    assert window_rect.contains(window.workspace_row.geometry())
+    assert isinstance(window.main_content_scroll, QScrollArea)
+    assert window.main_content_scroll.widget() is window.workspace_content
+    layout = window.workspace_row.layout()
+    assert layout.itemAt(0).widget() is window.video_panel
+    assert layout.itemAt(1).widget() is window.annotation_workspace
     assert window.video_panel.isVisible()
-    assert window.annotation_workspace.isVisible()
+    assert window.annotation_panel.isVisible()
 
 
-def test_collapsing_task_table_releases_right_pane_height_after_loading_source(
-    qt_app, tmp_path
-):
+def test_task_table_is_below_workspace_and_rejoins_page_after_detach(qt_app):
     window = MainWindow()
     window.resize(1120, 720)
     window.show()
-    window.set_source_path(tmp_path / "source.mp4")
     qt_app.processEvents()
 
-    window.task_panel.setChecked(False)
-    _wait_for_content_animation(qt_app, window, window.task_panel)
+    assert window.task_panel.parentWidget() is window.workspace_content
+    assert window.workspace_content.layout().indexOf(window.task_panel) > (
+        window.workspace_content.layout().indexOf(window.workspace_row)
+    )
+
+    window._show_task_table_dialog()
+    qt_app.processEvents()
+    window.task_table_dialog.close()
     qt_app.processEvents()
 
-    workspace_rect = window.annotation_workspace.contentsRect()
-    annotation_rect = window.annotation_panel.geometry()
-    task_rect = window.task_panel.geometry()
-    assert workspace_rect.contains(annotation_rect)
-    assert workspace_rect.contains(task_rect)
-    assert task_rect.height() < 100
+    assert window.task_panel.parentWidget() is window.workspace_content
 
 
 def test_workspace_uses_two_parallel_panels(qt_app):
@@ -2031,15 +2024,15 @@ def test_right_side_modules_are_collapsible_groups(qt_app):
     assert isinstance(window.task_panel, CollapsibleGroupBox)
 
 
-def test_task_table_receives_remaining_right_pane_height(qt_app):
+def test_task_table_keeps_a_usable_page_section(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
     qt_app.processEvents()
 
     assert window.task_panel.isChecked()
-    assert window.task_table.height() > 120
-    assert window.task_table.height() > window.behaviors_group.height()
+    assert window.task_table.height() >= 200
+    assert window.task_panel.parentWidget() is window.workspace_content
 
 
 def test_video_panel_receives_about_fifty_two_percent_of_workspace(qt_app):
@@ -2267,7 +2260,7 @@ def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
     window.records = [_clip_record("source.mp4", 1)]
     window._refresh_table()
 
-    assert window.task_panel.parentWidget() is window.annotation_workspace
+    assert window.task_panel.parentWidget() is window.workspace_content
 
     window._show_task_table_dialog()
     qt_app.processEvents()
@@ -2284,7 +2277,7 @@ def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
     window.task_table_dialog.close()
     qt_app.processEvents()
 
-    assert window.task_panel.parentWidget() is window.annotation_workspace
+    assert window.task_panel.parentWidget() is window.workspace_content
     assert window.task_table.currentRow() == 0
 
 
@@ -2294,7 +2287,7 @@ def test_narrow_window_keeps_embedded_table_until_user_detaches_it(qt_app):
     window.show()
     qt_app.processEvents()
 
-    assert window.task_panel.parentWidget() is window.annotation_workspace
+    assert window.task_panel.parentWidget() is window.workspace_content
 
     window.detach_table_button.click()
 
