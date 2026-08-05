@@ -38,8 +38,13 @@ from video_labeler.models import (
 from video_labeler.ffmpeg_service import ExportResult
 
 try:
-    from video_labeler.ui.main_window import CollapsibleGroupBox, MainWindow
+    from video_labeler.ui.main_window import (
+        BehaviorTagComboBox,
+        CollapsibleGroupBox,
+        MainWindow,
+    )
 except ImportError:
+    BehaviorTagComboBox = None
     CollapsibleGroupBox = None
     MainWindow = None
 
@@ -55,6 +60,15 @@ APPROVED_PLAYBACK_RATE_ITEMS = [
     "4.0x",
     "自定义",
 ]
+
+
+class PopupTrackingBehaviorTagComboBox(BehaviorTagComboBox):
+    def __init__(self):
+        super().__init__()
+        self.popup_requests = 0
+
+    def showPopup(self):
+        self.popup_requests += 1
 
 
 @pytest.fixture(scope="module")
@@ -212,6 +226,19 @@ def test_behavior_selector_holds_multiple_checked_tags(qt_app):
         "delivery_dropoff",
     )
     assert "2" in window.behavior_tag_combo.currentText()
+
+
+def test_clicking_behavior_selector_summary_opens_its_dropdown(qt_app):
+    combo = PopupTrackingBehaviorTagComboBox()
+    combo.set_tags(("dog_out", "fall"), ())
+    combo.resize(420, 36)
+    combo.show()
+    qt_app.processEvents()
+
+    QTest.mouseClick(combo.lineEdit(), Qt.MouseButton.LeftButton)
+    qt_app.processEvents()
+
+    assert combo.popup_requests == 1
 
 
 def test_behavior_selector_popup_contains_all_available_tags(qt_app):
@@ -2291,6 +2318,28 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
         )
         assert header_rect.contains(top_left)
         assert header_rect.contains(bottom_right)
+
+
+def test_annotation_fields_do_not_render_beneath_embedded_table_splitter(
+    qt_app,
+):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    field_center = window.lighting_combo.mapToGlobal(
+        window.lighting_combo.rect().center()
+    )
+    annotation_viewport = window.annotation_scroll.viewport()
+    splitter_handle = window.workspace_splitter.handle(1)
+
+    assert annotation_viewport.rect().contains(
+        annotation_viewport.mapFromGlobal(field_center)
+    )
+    assert not splitter_handle.rect().contains(
+        splitter_handle.mapFromGlobal(field_center)
+    )
 
 
 def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):

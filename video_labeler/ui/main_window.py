@@ -242,6 +242,7 @@ class BehaviorTagComboBox(QComboBox):
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.lineEdit().setReadOnly(True)
         self.lineEdit().setPlaceholderText("请选择行为标签")
+        self.lineEdit().installEventFilter(self)
         model = QStandardItemModel(self)
         model.dataChanged.connect(self._on_model_data_changed)
         self.setModel(model)
@@ -307,6 +308,15 @@ class BehaviorTagComboBox(QComboBox):
             item.checkState() != Qt.CheckState.Checked,
         )
         QTimer.singleShot(0, self.showPopup)
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            watched is self.lineEdit()
+            and event.type() == QEvent.Type.MouseButtonPress
+        ):
+            self.showPopup()
+            return True
+        return super().eventFilter(watched, event)
 
     def _on_model_data_changed(self, _top_left, _bottom_right, roles) -> None:
         if roles and Qt.ItemDataRole.CheckStateRole not in roles:
@@ -409,6 +419,10 @@ class MainWindow(QMainWindow):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.annotation_scroll.installEventFilter(self)
+        self.annotation_scroll.setMinimumHeight(
+            self.annotation_panel.minimumSizeHint().height()
+            + (self.annotation_scroll.frameWidth() * 2)
+        )
         self.task_panel = self._build_task_table()
         self.task_panel.setObjectName("taskCard")
         self.task_panel.setMinimumHeight(320)
