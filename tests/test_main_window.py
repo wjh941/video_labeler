@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSlider,
-    QSplitter,
     QTableWidget,
 )
 
@@ -1959,37 +1958,53 @@ def test_main_window_uses_a_draggable_timeline_slider(qt_app):
     assert isinstance(window.timeline_slider, QSlider)
 
 
-def test_main_window_uses_resizable_workspace_splitters(qt_app):
+@pytest.mark.parametrize(("width", "height"), ((1120, 720), (1440, 900)))
+def test_workspace_has_no_global_vertical_scroll_area(qt_app, width, height):
     window = MainWindow()
+    window.resize(width, height)
+    window.show()
+    qt_app.processEvents()
 
-    assert isinstance(window.workspace_splitter, QSplitter)
-    assert window.workspace_splitter.orientation() == Qt.Orientation.Vertical
-    assert isinstance(window.editor_splitter, QSplitter)
-    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
+    assert not hasattr(window, "main_content_scroll")
+    assert not window.findChildren(QScrollArea)
 
 
-def test_workspace_uses_two_parallel_panels_with_right_side_table(qt_app):
+def test_importing_video_keeps_fixed_screen_workspace_unclipped(qt_app, tmp_path):
+    window = MainWindow()
+    window.resize(1120, 720)
+    window.show()
+    window.set_source_path(tmp_path / "source.mp4")
+    qt_app.processEvents()
+
+    window_rect = window.centralWidget().contentsRect()
+    assert window_rect.contains(window.workspace_row.geometry())
+    assert window.video_panel.isVisible()
+    assert window.annotation_workspace.isVisible()
+
+
+def test_workspace_uses_two_parallel_panels(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
     qt_app.processEvents()
 
-    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
-    assert window.editor_splitter.widget(0) is window.video_panel
-    assert window.editor_splitter.widget(1) is window.workspace_splitter
-    assert window.workspace_splitter.widget(0) is window.annotation_scroll
-    assert window.workspace_splitter.widget(1) is window.task_panel
+    layout = window.workspace_row.layout()
+    assert layout.count() == 2
+    assert layout.itemAt(0).widget() is window.video_panel
+    assert layout.itemAt(1).widget() is window.annotation_workspace
 
 
-def test_video_panel_receives_about_fifty_five_percent_of_workspace(qt_app):
+def test_video_panel_receives_about_fifty_two_percent_of_workspace(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
     qt_app.processEvents()
 
-    left, right = window.editor_splitter.sizes()
-    assert left > right
-    assert left / (left + right) == pytest.approx(0.55, abs=0.025)
+    video_width = window.video_panel.width()
+    annotation_width = window.annotation_workspace.width()
+    assert video_width / (video_width + annotation_width) == pytest.approx(
+        0.52, abs=0.04
+    )
 
 
 def test_toolbar_uses_three_semantic_action_groups(qt_app):
@@ -2088,61 +2103,6 @@ def test_selecting_output_folder_refreshes_elided_path_display(
 
     assert window.output_folder_label.toolTip() == str(Path(selected))
     assert "…" in window.output_folder_label.text()
-
-
-def test_horizontal_editor_splitter_uses_video_to_form_five_to_four_ratio(qt_app):
-    window = MainWindow()
-    window.resize(1920, 900)
-    window.show()
-    qt_app.processEvents()
-
-    video_size, form_size = window.editor_splitter.sizes()
-    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
-    assert video_size / form_size == pytest.approx(5 / 4, rel=0.15)
-
-
-def test_editor_splitter_stays_horizontal_in_a_narrow_content_viewport(qt_app):
-    window = MainWindow()
-    window.resize(1280, 900)
-    window.show()
-    qt_app.processEvents()
-
-    assert window.main_content_scroll.viewport().width() < 1280
-    window._editor_splitter_stacked = False
-    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
-
-    window._update_editor_splitter_orientation()
-
-    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
-    assert window._editor_splitter_stacked is False
-
-
-def test_importing_video_rechecks_right_panel_constraints(
-    qt_app, tmp_path, monkeypatch
-):
-    window = MainWindow()
-    calls = []
-    original_minimum_recheck = window._set_annotation_minimum_width
-    original_splitter_recheck = window._update_editor_splitter_orientation
-
-    def record_minimum_recheck() -> None:
-        calls.append("minimum")
-        original_minimum_recheck()
-
-    def record_splitter_recheck() -> None:
-        calls.append("splitter")
-        original_splitter_recheck()
-
-    monkeypatch.setattr(
-        window, "_set_annotation_minimum_width", record_minimum_recheck
-    )
-    monkeypatch.setattr(
-        window, "_update_editor_splitter_orientation", record_splitter_recheck
-    )
-
-    window.set_source_path(tmp_path / "new-source.mp4")
-
-    assert calls == ["minimum", "splitter"]
 
 
 def test_card_workspace_uses_semantic_cards_without_overlapping_video_controls(
@@ -2244,111 +2204,12 @@ def test_refined_video_controls_fit_without_text_clipping(qt_app, width, height)
     )
 
 
-@pytest.mark.parametrize(("width", "height"), ((1120, 720), (1440, 900)))
-def test_refined_workspace_does_not_clip_header_or_annotation_actions(
-    qt_app, width, height
-):
-    window = MainWindow()
-    window.resize(width, height)
-    window.show()
-    qt_app.processEvents()
-
-    viewport = window.main_content_scroll.viewport()
-    annotation_rect = window.annotation_panel.contentsRect()
-    header_rect = window.project_header.contentsRect()
-    annotation_actions = (
-        window.add_button,
-        window.remove_button,
-        window.undo_button,
-        window.redo_button,
-        window.clear_button,
-    )
-    first_filter_row_controls = (
-        window.behavior_filter_combo,
-        window.polarity_filter_combo,
-    )
-    second_filter_row_controls = (
-        window.status_filter_combo,
-        window.sort_combo,
-        window.clear_filters_button,
-    )
-    table_action_controls = (
-        window.batch_edit_button,
-        window.batch_delete_button,
-        window.detach_table_button,
-    )
-
-    assert window.workspace_content.width() <= viewport.width()
-    assert window.editor_splitter.width() <= viewport.width()
-    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
-    assert all(
-        button.width() >= button.sizeHint().width()
-        and annotation_rect.contains(button.geometry())
-        for button in annotation_actions
-    )
-    assert all(
-        control.width() >= control.sizeHint().width()
-        and window.table_filter_primary_row.contentsRect().contains(
-            control.geometry()
-        )
-        for control in first_filter_row_controls
-    )
-    assert all(
-        control.width() >= control.sizeHint().width()
-        and window.table_filter_secondary_row.contentsRect().contains(
-            control.geometry()
-        )
-        for control in second_filter_row_controls
-    )
-    assert all(
-        control.width() >= control.sizeHint().width()
-        and window.table_action_bar.contentsRect().contains(control.geometry())
-        for control in table_action_controls
-    )
-    for action_group in (
-        window.import_action_group,
-        window.csv_action_group,
-        window.export_action_group,
-        window.settings_action_group,
-    ):
-        top_left = action_group.mapTo(window.project_header, QPoint(0, 0))
-        bottom_right = action_group.mapTo(
-            window.project_header,
-            QPoint(action_group.width() - 1, action_group.height() - 1),
-        )
-        assert header_rect.contains(top_left)
-        assert header_rect.contains(bottom_right)
-
-
-def test_annotation_fields_do_not_render_beneath_embedded_table_splitter(
-    qt_app,
-):
-    window = MainWindow()
-    window.resize(1440, 900)
-    window.show()
-    qt_app.processEvents()
-
-    field_center = window.lighting_combo.mapToGlobal(
-        window.lighting_combo.rect().center()
-    )
-    annotation_viewport = window.annotation_scroll.viewport()
-    splitter_handle = window.workspace_splitter.handle(1)
-
-    assert annotation_viewport.rect().contains(
-        annotation_viewport.mapFromGlobal(field_center)
-    )
-    assert not splitter_handle.rect().contains(
-        splitter_handle.mapFromGlobal(field_center)
-    )
-
-
 def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
     window = MainWindow()
     window.records = [_clip_record("source.mp4", 1)]
     window._refresh_table()
 
-    assert window.workspace_splitter.indexOf(window.task_panel) == 1
-    assert window.task_panel.parentWidget() is window.workspace_splitter
+    assert window.task_panel.parentWidget() is window.annotation_workspace
 
     window._show_task_table_dialog()
     qt_app.processEvents()
@@ -2365,8 +2226,7 @@ def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
     window.task_table_dialog.close()
     qt_app.processEvents()
 
-    assert window.workspace_splitter.indexOf(window.task_panel) == 1
-    assert window.task_panel.parentWidget() is window.workspace_splitter
+    assert window.task_panel.parentWidget() is window.annotation_workspace
     assert window.task_table.currentRow() == 0
 
 
@@ -2376,41 +2236,11 @@ def test_narrow_window_keeps_embedded_table_until_user_detaches_it(qt_app):
     window.show()
     qt_app.processEvents()
 
-    assert window.main_content_scroll.verticalScrollBar().maximum() > 0
-    assert window.task_panel.parentWidget() is window.workspace_splitter
+    assert window.task_panel.parentWidget() is window.annotation_workspace
 
     window.detach_table_button.click()
 
     assert window.task_table_dialog.isVisible()
-
-
-def test_video_first_workspace_scrolls_instead_of_compressing_preview(qt_app):
-    window = MainWindow()
-    window.resize(1280, 720)
-    window.show()
-    qt_app.processEvents()
-
-    assert isinstance(window.main_content_scroll, QScrollArea)
-    assert window.main_content_scroll.widget() is window.workspace_content
-    assert window.main_content_scroll.verticalScrollBar().maximum() > 0
-    assert window.editor_splitter.indexOf(window.video_panel) == 0
-    assert window.editor_splitter.indexOf(window.workspace_splitter) == 1
-    assert window.workspace_splitter.indexOf(window.annotation_scroll) == 0
-    assert window.workspace_splitter.indexOf(window.task_panel) == 1
-    assert window.editor_splitter.minimumHeight() >= 560
-    assert window.video_widget.minimumHeight() >= 420
-
-    assert window.video_panel.geometry().right() < (
-        window.workspace_splitter.geometry().left()
-    )
-    assert window.task_panel.findChild(QTableWidget) is window.task_table
-
-    window.records = [_clip_record("source.mp4", 1)]
-    window._refresh_table()
-    window.task_table.selectRow(0)
-    qt_app.processEvents()
-
-    assert window._editing_index == 0
 
 
 def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
@@ -2491,14 +2321,6 @@ def test_video_progress_and_controls_use_a_dedicated_panel_below_preview(qt_app)
     )
 
 
-def test_annotation_controls_are_wrapped_in_a_scroll_area(qt_app):
-    window = MainWindow()
-
-    assert isinstance(window.annotation_scroll, QScrollArea)
-    assert window.annotation_scroll.widget() is window.annotation_panel
-    assert window.annotation_scroll.widgetResizable()
-
-
 def test_add_clip_action_appears_before_behavior_choices(qt_app):
     window = MainWindow()
     window.resize(1366, 768)
@@ -2506,10 +2328,10 @@ def test_add_clip_action_appears_before_behavior_choices(qt_app):
     qt_app.processEvents()
 
     add_clip_y = window.add_button.mapTo(
-        window.annotation_panel, QPoint(0, 0)
+        window.annotation_workspace, QPoint(0, 0)
     ).y()
     behaviors_y = window.behaviors_group.mapTo(
-        window.annotation_panel, QPoint(0, 0)
+        window.annotation_workspace, QPoint(0, 0)
     ).y()
 
     assert add_clip_y < behaviors_y
