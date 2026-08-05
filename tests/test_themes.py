@@ -14,8 +14,8 @@ def test_light_fresh_theme_loads_global_dialog_and_tooltip_rules():
 
     stylesheet = load_light_fresh_theme()
     assert app.styleSheet() == stylesheet
-    assert "#F3F6FA" in stylesheet
-    assert "#4F97E8" in stylesheet
+    assert "#f7f8fa" in stylesheet
+    assert "#1677ff" in stylesheet
     for selector in (
         "QDialog",
         "QMessageBox",
@@ -37,9 +37,9 @@ def test_light_theme_keeps_file_dialog_browser_views_unforced():
     assert "QFileDialog QComboBox" in stylesheet
     assert "QFileDialog QAbstractItemView" in stylesheet
     assert "QFileDialog QAbstractScrollArea::viewport" in stylesheet
-    assert "background: #FFFFFF;" in stylesheet
-    assert "color: #253042;" in stylesheet
-    assert "selection-background-color: #E8F2FF;" in stylesheet
+    assert "background: #ffffff;" in stylesheet
+    assert "color: #1f2329;" in stylesheet
+    assert "selection-background-color: #e8f3ff;" in stylesheet
 
 
 def test_light_theme_contains_card_workspace_selectors():
@@ -51,14 +51,35 @@ def test_light_theme_contains_card_workspace_selectors():
         "QGroupBox#annotationCard",
         "QGroupBox#taskCard",
         "QWidget#videoControlsPanel",
-        "QWidget#importActionGroup",
-        "QWidget#csvActionGroup",
-        "QWidget#exportActionGroup",
-        "QWidget#settingsActionGroup",
+        "QWidget#importCsvActionGroup",
+        "QWidget#exportOutputActionGroup",
+        "QWidget#settingsOperationActionGroup",
         "QLabel#playbackRateBadge",
         "QWidget#tableFilterBar",
         "QWidget#tableActionBar",
         "QCheckBox#behaviorTag",
+        "QCheckBox#customBehaviorTag",
+        "QLabel#historicalBehaviorTag",
+        "QToolButton#customTagDeleteButton",
         "QTableWidget::item:alternate",
     ):
         assert selector in stylesheet
+
+
+def test_light_theme_contains_ant_desktop_tokens_and_eight_pixel_radius():
+    stylesheet = load_light_fresh_theme()
+
+    for token in (
+        "#f7f8fa",
+        "#ffffff",
+        "#1677ff",
+        "#4096ff",
+        "#ff7875",
+        "#f2f3f5",
+        "#4e5969",
+        "#1f2329",
+        "#86909c",
+        "#e5e6eb",
+        "border-radius: 8px",
+    ):
+        assert token in stylesheet
