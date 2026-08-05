@@ -14,8 +14,8 @@ def test_light_fresh_theme_loads_global_dialog_and_tooltip_rules():
 
     stylesheet = load_light_fresh_theme()
     assert app.styleSheet() == stylesheet
-    assert "#F5F7FA" in stylesheet
-    assert "#409EFF" in stylesheet
+    assert "#F3F6FA" in stylesheet
+    assert "#4F97E8" in stylesheet
     for selector in (
         "QDialog",
         "QMessageBox",
@@ -38,8 +38,8 @@ def test_light_theme_keeps_file_dialog_browser_views_unforced():
     assert "QFileDialog QAbstractItemView" in stylesheet
     assert "QFileDialog QAbstractScrollArea::viewport" in stylesheet
     assert "background: #FFFFFF;" in stylesheet
-    assert "color: #303133;" in stylesheet
-    assert "selection-background-color: #ECF5FF;" in stylesheet
+    assert "color: #253042;" in stylesheet
+    assert "selection-background-color: #E8F2FF;" in stylesheet
 
 
 def test_light_theme_contains_card_workspace_selectors():
@@ -51,5 +51,14 @@ def test_light_theme_contains_card_workspace_selectors():
         "QGroupBox#annotationCard",
         "QGroupBox#taskCard",
         "QWidget#videoControlsPanel",
+        "QWidget#importActionGroup",
+        "QWidget#csvActionGroup",
+        "QWidget#exportActionGroup",
+        "QWidget#settingsActionGroup",
+        "QLabel#playbackRateBadge",
+        "QWidget#tableFilterBar",
+        "QWidget#tableActionBar",
+        "QCheckBox#behaviorTag",
+        "QTableWidget::item:alternate",
     ):
         assert selector in stylesheet

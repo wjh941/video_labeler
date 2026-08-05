@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -109,7 +110,7 @@ TABLE_COLUMNS = (
 BEHAVIOR_COLUMN_PADDING = 16
 CUSTOM_OPTION_TEXT = "自定义..."
 CUSTOM_PLAYBACK_RATE_TEXT = "自定义"
-PLAYBACK_RATE_PRESETS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0)
+PLAYBACK_RATE_PRESETS = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
 STATUS_LABELS = {
     "queued": "排队中",
     "ok": "成功",
@@ -182,6 +183,7 @@ class CollapsibleGroupBox(QGroupBox):
         self._animation.stop()
         if expanded:
             self._content.setVisible(True)
+            self._content.setMinimumHeight(0)
             start_height = 0
             target_height = max(
                 self._content.sizeHint().height(),
@@ -189,6 +191,7 @@ class CollapsibleGroupBox(QGroupBox):
             )
             self._content.setMaximumHeight(start_height)
         else:
+            self._content.setMinimumHeight(0)
             start_height = max(
                 self._content.height(),
                 self._content.sizeHint().height(),
@@ -206,6 +209,7 @@ class CollapsibleGroupBox(QGroupBox):
             return
         if self.isChecked():
             self._content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
+            self._content.setMinimumHeight(self._content.sizeHint().height())
             self._content.updateGeometry()
         else:
             self._content.setVisible(False)
@@ -245,6 +249,13 @@ class MainWindow(QMainWindow):
         self._export_records: list[ClipRecord] = []
         self._export_record_states: list[tuple[str, str]] = []
         self._last_playback_rate = 1.0
+        self._button_hover_effects: dict[
+            QPushButton, QGraphicsDropShadowEffect
+        ] = {}
+        self._button_hover_animations: dict[
+            QPushButton, QPropertyAnimation
+        ] = {}
+        self._editor_splitter_stacked = False
 
         self.setWindowTitle("视频片段标注工具")
         self.setMinimumSize(1120, 720)
@@ -337,6 +348,7 @@ class MainWindow(QMainWindow):
             self.task_panel,
         ):
             self._apply_card_shadow(card)
+        self._install_presentation_button_effects()
 
         self.main_content_scroll.setWidget(self.workspace_content)
         root_layout.addWidget(self.main_content_scroll)
@@ -344,10 +356,58 @@ class MainWindow(QMainWindow):
 
     def _apply_card_shadow(self, widget: QWidget) -> None:
         effect = QGraphicsDropShadowEffect(widget)
-        effect.setBlurRadius(18)
-        effect.setOffset(0, 3)
-        effect.setColor(QColor(31, 45, 61, 28))
+        effect.setBlurRadius(24)
+        effect.setOffset(0, 4)
+        effect.setColor(QColor(37, 48, 66, 32))
         widget.setGraphicsEffect(effect)
+
+    def _install_presentation_button_effects(self) -> None:
+        """Add subtle elevation feedback without changing button behavior."""
+        for button in (
+            self.open_video_button,
+            self.import_csv_button,
+            self.save_csv_button,
+            self.output_folder_button,
+            self.export_button,
+            self.shortcut_help_button,
+            self.play_button,
+            self.seek_back_button,
+            self.seek_forward_button,
+            self.set_start_button,
+            self.set_end_button,
+            self.add_button,
+            self.remove_button,
+            self.undo_button,
+            self.redo_button,
+            self.clear_button,
+            self.batch_edit_button,
+            self.batch_delete_button,
+            self.detach_table_button,
+        ):
+            self._attach_button_hover_effect(button)
+
+    def _attach_button_hover_effect(self, button: QPushButton) -> None:
+        if button in self._button_hover_effects:
+            return
+        effect = QGraphicsDropShadowEffect(button)
+        effect.setBlurRadius(0)
+        effect.setOffset(0, 2)
+        effect.setColor(QColor(79, 151, 232, 54))
+        animation = QPropertyAnimation(effect, b"blurRadius", button)
+        animation.setDuration(180)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        button.setGraphicsEffect(effect)
+        button.installEventFilter(self)
+        self._button_hover_effects[button] = effect
+        self._button_hover_animations[button] = animation
+
+    def _animate_button_hover(self, button: QPushButton, target_blur: float) -> None:
+        effect = self._button_hover_effects[button]
+        animation = self._button_hover_animations[button]
+        animation.stop()
+        animation.setStartValue(effect.blurRadius())
+        animation.setEndValue(target_blur)
+        animation.start()
 
     def _build_project_header(self) -> QGroupBox:
         group = QGroupBox("项目设置")
@@ -368,6 +428,11 @@ class MainWindow(QMainWindow):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.output_folder_label.setObjectName("mutedLabel")
+        self.output_folder_label.setWordWrap(True)
+        self.output_folder_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
 
         self.date_edit = QLineEdit()
         self.date_edit.setPlaceholderText("YYYYMMDD")
@@ -395,42 +460,64 @@ class MainWindow(QMainWindow):
         action_layout = QHBoxLayout()
         action_layout.setSpacing(8)
 
-        project_actions = QWidget()
-        project_actions.setObjectName("toolbarActionGroup")
-        project_actions_layout = QHBoxLayout(project_actions)
-        project_actions_layout.setContentsMargins(0, 0, 0, 0)
-        project_actions_layout.setSpacing(6)
-        project_actions_layout.addWidget(self.open_video_button)
-        project_actions_layout.addWidget(self.import_csv_button)
-        project_actions_layout.addWidget(self.save_csv_button)
-        action_layout.addWidget(project_actions)
+        def create_action_group(
+            object_name: str, caption: str
+        ) -> tuple[QWidget, QHBoxLayout]:
+            action_group = QWidget()
+            action_group.setObjectName(object_name)
+            action_group_layout = QVBoxLayout(action_group)
+            action_group_layout.setContentsMargins(0, 0, 0, 0)
+            action_group_layout.setSpacing(4)
+            caption_label = QLabel(caption)
+            caption_label.setObjectName("toolbarGroupCaption")
+            action_group_layout.addWidget(caption_label)
+            buttons_layout = QHBoxLayout()
+            buttons_layout.setContentsMargins(0, 0, 0, 0)
+            buttons_layout.setSpacing(6)
+            action_group_layout.addLayout(buttons_layout)
+            return action_group, buttons_layout
 
-        import_export_separator = QFrame()
-        import_export_separator.setObjectName("toolbarSeparator")
-        import_export_separator.setFrameShape(QFrame.Shape.VLine)
-        action_layout.addWidget(import_export_separator)
+        self.import_action_group, import_actions_layout = create_action_group(
+            "importActionGroup", "导入"
+        )
+        import_actions_layout.addWidget(self.open_video_button)
+        action_layout.addWidget(self.import_action_group)
 
-        export_actions = QWidget()
-        export_actions.setObjectName("toolbarActionGroup")
-        export_actions_layout = QHBoxLayout(export_actions)
-        export_actions_layout.setContentsMargins(0, 0, 0, 0)
-        export_actions_layout.setSpacing(6)
+        csv_separator = QFrame()
+        csv_separator.setObjectName("toolbarSeparator")
+        csv_separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(csv_separator)
+
+        self.csv_action_group, csv_actions_layout = create_action_group(
+            "csvActionGroup", "CSV"
+        )
+        csv_actions_layout.addWidget(self.import_csv_button)
+        csv_actions_layout.addWidget(self.save_csv_button)
+        action_layout.addWidget(self.csv_action_group)
+
+        export_separator = QFrame()
+        export_separator.setObjectName("toolbarSeparator")
+        export_separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(export_separator)
+
+        self.export_action_group, export_actions_layout = create_action_group(
+            "exportActionGroup", "导出"
+        )
         export_actions_layout.addWidget(self.output_folder_button)
         export_actions_layout.addWidget(self.output_folder_label, stretch=1)
         export_actions_layout.addWidget(self.export_button)
-        action_layout.addWidget(export_actions, stretch=1)
+        action_layout.addWidget(self.export_action_group, stretch=1)
 
-        help_separator = QFrame()
-        help_separator.setObjectName("toolbarSeparator")
-        help_separator.setFrameShape(QFrame.Shape.VLine)
-        action_layout.addWidget(help_separator)
+        settings_separator = QFrame()
+        settings_separator.setObjectName("toolbarSeparator")
+        settings_separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(settings_separator)
 
-        assistance_actions = QWidget()
-        assistance_actions.setObjectName("toolbarActionGroup")
-        assistance_actions_layout = QHBoxLayout(assistance_actions)
-        assistance_actions_layout.setContentsMargins(0, 0, 0, 0)
-        assistance_actions_layout.addWidget(self.shortcut_help_button)
-        action_layout.addWidget(assistance_actions)
+        self.settings_action_group, settings_actions_layout = (
+            create_action_group("settingsActionGroup", "设置")
+        )
+        settings_actions_layout.addWidget(self.shortcut_help_button)
+        action_layout.addWidget(self.settings_action_group)
         layout.addLayout(action_layout)
 
         metadata_layout = QHBoxLayout()
@@ -503,6 +590,14 @@ class MainWindow(QMainWindow):
         self.video_item = QGraphicsVideoItem()
         self.video_item.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
         self.video_scene.addItem(self.video_item)
+        self.video_placeholder_item = self.video_scene.addSimpleText(
+            "导入视频后开始标注"
+        )
+        self.video_placeholder_item.setBrush(QColor("#B9C8D9"))
+        self.video_placeholder_item.setAcceptedMouseButtons(
+            Qt.MouseButton.NoButton
+        )
+        self.video_placeholder_item.setZValue(1)
         self.video_widget.setScene(self.video_scene)
         self.video_viewport = self.video_widget.viewport()
         self.video_viewport.installEventFilter(self)
@@ -513,6 +608,7 @@ class MainWindow(QMainWindow):
         self.audio_output = QAudioOutput(self)
         self.player.setAudioOutput(self.audio_output)
         self.player.setVideoOutput(self.video_item)
+        self._update_video_placeholder(QMediaPlayer.MediaStatus.NoMedia)
 
         self.video_controls_panel = QWidget()
         self.video_controls_panel.setObjectName("videoControlsPanel")
@@ -533,12 +629,28 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(self.duration_label)
         video_controls_layout.addLayout(position_layout)
 
-        controls = QHBoxLayout()
+        transport_controls = QHBoxLayout()
+        transport_controls.setSpacing(8)
         self.play_button = QPushButton("播放")
         self.seek_back_button = QPushButton("-5s")
         self.seek_forward_button = QPushButton("+5s")
         self.set_start_button = QPushButton("设置起始点")
         self.set_end_button = QPushButton("设置结束点")
+        standard_icons = self.style()
+        self.play_button.setIcon(
+            standard_icons.standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
+        )
+        self.seek_back_button.setIcon(
+            standard_icons.standardIcon(QStyle.StandardPixmap.SP_MediaSeekBackward)
+        )
+        self.seek_forward_button.setIcon(
+            standard_icons.standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward)
+        )
+        self.play_button.setToolTip("播放或暂停（空格）")
+        self.seek_back_button.setToolTip("后退 5 秒")
+        self.seek_forward_button.setToolTip("前进 5 秒")
+        self.set_start_button.setToolTip("设置当前帧为起始点（S）")
+        self.set_end_button.setToolTip("设置当前帧为结束点（E）")
         self.speed_combo = QComboBox()
         for rate in PLAYBACK_RATE_PRESETS:
             self.speed_combo.addItem(f"{rate}x", rate)
@@ -552,17 +664,25 @@ class MainWindow(QMainWindow):
         self.custom_speed_spin.setSuffix("x")
         self.custom_speed_spin.setObjectName("customPlaybackRateSpin")
         self.custom_speed_spin.setValue(self._last_playback_rate)
+        self.playback_rate_badge = QLabel("1.0x")
+        self.playback_rate_badge.setObjectName("playbackRateBadge")
 
-        controls.addWidget(self.play_button)
-        controls.addWidget(self.seek_back_button)
-        controls.addWidget(self.seek_forward_button)
-        controls.addStretch(1)
-        controls.addWidget(self.set_start_button)
-        controls.addWidget(self.set_end_button)
-        controls.addWidget(QLabel("播放速度"))
-        controls.addWidget(self.speed_combo)
-        controls.addWidget(self.custom_speed_spin)
-        video_controls_layout.addLayout(controls)
+        transport_controls.addWidget(self.play_button)
+        transport_controls.addWidget(self.seek_back_button)
+        transport_controls.addWidget(self.seek_forward_button)
+        transport_controls.addStretch(1)
+        transport_controls.addWidget(self.set_start_button)
+        transport_controls.addWidget(self.set_end_button)
+        video_controls_layout.addLayout(transport_controls)
+
+        playback_rate_layout = QHBoxLayout()
+        playback_rate_layout.setSpacing(8)
+        playback_rate_layout.addStretch(1)
+        playback_rate_layout.addWidget(QLabel("播放速度"))
+        playback_rate_layout.addWidget(self.playback_rate_badge)
+        playback_rate_layout.addWidget(self.speed_combo)
+        playback_rate_layout.addWidget(self.custom_speed_spin)
+        video_controls_layout.addLayout(playback_rate_layout)
         layout.addWidget(self.video_controls_panel)
         return group
 
@@ -595,7 +715,9 @@ class MainWindow(QMainWindow):
         time_form.addRow("编号", self.sequence_spin)
         layout.addLayout(time_form)
 
-        actions = QHBoxLayout()
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(8)
+        actions.setVerticalSpacing(8)
         self.add_button = QPushButton("添加片段")
         self.remove_button = QPushButton("删除所选")
         self.undo_button = QPushButton("撤销")
@@ -605,11 +727,13 @@ class MainWindow(QMainWindow):
         self.remove_button.setObjectName("dangerButton")
         self.undo_button.setObjectName("undoButton")
         self.redo_button.setObjectName("redoButton")
-        actions.addWidget(self.add_button)
-        actions.addWidget(self.remove_button)
-        actions.addWidget(self.undo_button)
-        actions.addWidget(self.redo_button)
-        actions.addWidget(self.clear_button)
+        actions.addWidget(self.add_button, 0, 0)
+        actions.addWidget(self.remove_button, 0, 1)
+        actions.addWidget(self.undo_button, 0, 2)
+        actions.addWidget(self.redo_button, 1, 0)
+        actions.addWidget(self.clear_button, 1, 1, 1, 2)
+        for column in range(3):
+            actions.setColumnStretch(column, 1)
         layout.addLayout(actions)
 
         self.behavior_checks: dict[str, QCheckBox] = {}
@@ -631,6 +755,7 @@ class MainWindow(QMainWindow):
 
         for behavior in BEHAVIOR_LABELS:
             checkbox = QCheckBox(behavior)
+            checkbox.setObjectName("behaviorTag")
             self.behavior_checks[behavior] = checkbox
         self._reflow_behavior_checks()
         layout.addWidget(self.behaviors_group)
@@ -762,11 +887,38 @@ class MainWindow(QMainWindow):
             self.behavior_checks_container.setMaximumHeight(
                 CollapsibleGroupBox._UNRESTRICTED_HEIGHT
             )
+            self.behavior_checks_container.setMinimumHeight(
+                self.behavior_checks_container.sizeHint().height()
+            )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "behavior_checks_layout"):
+            self._update_editor_splitter_orientation()
             self._schedule_behavior_reflow()
+
+    def _update_editor_splitter_orientation(self) -> None:
+        """Stack the existing panels before either one can be horizontally cut."""
+        if not hasattr(self, "editor_splitter"):
+            return
+        available_width = max(
+            self.main_content_scroll.viewport().width(),
+            self.width(),
+        )
+        should_stack = available_width < 1280
+        if should_stack == self._editor_splitter_stacked:
+            return
+
+        self._editor_splitter_stacked = should_stack
+        self.editor_splitter.setOrientation(
+            Qt.Orientation.Vertical
+            if should_stack
+            else Qt.Orientation.Horizontal
+        )
+        self.editor_splitter.setSizes(
+            [680, 560] if should_stack else [616, 788]
+        )
+        self._release_behavior_width_constraints()
 
     def _resize_video_item(self) -> None:
         if not hasattr(self, "video_viewport"):
@@ -774,8 +926,19 @@ class MainWindow(QMainWindow):
         size = self.video_viewport.size()
         self.video_scene.setSceneRect(0, 0, size.width(), size.height())
         self.video_item.setSize(QSizeF(size))
+        if hasattr(self, "video_placeholder_item"):
+            bounds = self.video_placeholder_item.boundingRect()
+            self.video_placeholder_item.setPos(
+                (size.width() - bounds.width()) / 2,
+                (size.height() - bounds.height()) / 2,
+            )
 
     def eventFilter(self, watched, event) -> bool:
+        if watched in self._button_hover_effects:
+            if event.type() == QEvent.Type.Enter:
+                self._animate_button_hover(watched, 13)
+            elif event.type() == QEvent.Type.Leave:
+                self._animate_button_hover(watched, 0)
         if event.type() != QEvent.Type.Resize:
             return super().eventFilter(watched, event)
         if watched is getattr(self, "annotation_scroll", None):
@@ -805,15 +968,27 @@ class MainWindow(QMainWindow):
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
         )
+        self.task_table.setAlternatingRowColors(True)
+        self.task_table.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.task_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
         self.task_table.verticalHeader().setVisible(False)
-        self.task_table.verticalHeader().setDefaultSectionSize(26)
+        self.task_table.verticalHeader().setDefaultSectionSize(34)
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         for column, width in enumerate((72, 98, 98, 82, 210, 72, 150, 430, 80, 260)):
             self.task_table.setColumnWidth(column, width)
 
-        toolbar = QHBoxLayout()
+        self.table_filter_bar = QWidget()
+        self.table_filter_bar.setObjectName("tableFilterBar")
+        filter_layout = QHBoxLayout(self.table_filter_bar)
+        filter_layout.setContentsMargins(8, 6, 8, 6)
+        filter_layout.setSpacing(8)
         self.batch_edit_button = QPushButton("批量修改选中片段")
         self.batch_delete_button = QPushButton("批量删除选中")
         self.batch_delete_button.setObjectName("dangerButton")
@@ -842,19 +1017,29 @@ class MainWindow(QMainWindow):
         self.sort_combo.addItem("时长降序", ("duration", True))
         self.clear_filters_button = QPushButton("清空筛选")
 
-        toolbar.addWidget(self.batch_edit_button)
-        toolbar.addWidget(self.batch_delete_button)
-        toolbar.addWidget(self.behavior_filter_combo)
-        toolbar.addWidget(self.polarity_filter_combo)
-        toolbar.addWidget(self.status_filter_combo)
-        toolbar.addWidget(self.sort_combo)
-        toolbar.addWidget(self.clear_filters_button)
-        toolbar.addStretch(1)
+        filter_layout.addWidget(QLabel("筛选"))
+        filter_layout.addWidget(self.behavior_filter_combo)
+        filter_layout.addWidget(self.polarity_filter_combo)
+        filter_layout.addWidget(self.status_filter_combo)
+        filter_layout.addWidget(QLabel("排序"))
+        filter_layout.addWidget(self.sort_combo)
+        filter_layout.addWidget(self.clear_filters_button)
+        filter_layout.addStretch(1)
+        layout.addWidget(self.table_filter_bar)
+
+        self.table_action_bar = QWidget()
+        self.table_action_bar.setObjectName("tableActionBar")
+        action_layout = QHBoxLayout(self.table_action_bar)
+        action_layout.setContentsMargins(8, 6, 8, 6)
+        action_layout.setSpacing(8)
+        action_layout.addWidget(self.batch_edit_button)
+        action_layout.addWidget(self.batch_delete_button)
+        action_layout.addStretch(1)
         self.detach_table_button = QPushButton("弹出表格")
         self.detach_table_button.setObjectName("secondaryButton")
-        toolbar.addWidget(self.detach_table_button)
-        layout.addLayout(toolbar)
+        action_layout.addWidget(self.detach_table_button)
         layout.addWidget(self.task_table)
+        layout.addWidget(self.table_action_bar)
         return group
 
     def _show_task_table_dialog(self) -> None:
@@ -1018,6 +1203,7 @@ class MainWindow(QMainWindow):
         self.player.positionChanged.connect(self._update_position)
         self.player.durationChanged.connect(self._update_duration)
         self.player.playbackStateChanged.connect(self._update_play_button)
+        self.player.mediaStatusChanged.connect(self._update_video_placeholder)
         self.player.errorOccurred.connect(self._media_error)
         self.advanced_export_group.toggled.connect(
             self.advanced_export_content.setVisible
@@ -1679,6 +1865,7 @@ class MainWindow(QMainWindow):
                 self.speed_combo.setCurrentIndex(
                     self.speed_combo.findData(None)
                 )
+        self.playback_rate_badge.setText(f"{rate:g}x")
 
     def _update_position(self, milliseconds: int) -> None:
         with QSignalBlocker(self.timeline_slider):
@@ -1691,11 +1878,38 @@ class MainWindow(QMainWindow):
         self.duration_label.setText(format_seconds(milliseconds / 1000))
 
     def _update_play_button(self, state: QMediaPlayer.PlaybackState) -> None:
-        self.play_button.setText(
-            "暂停"
-            if state == QMediaPlayer.PlaybackState.PlayingState
-            else "播放"
+        is_playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self.play_button.setText("暂停" if is_playing else "播放")
+        icon = (
+            QStyle.StandardPixmap.SP_MediaPause
+            if is_playing
+            else QStyle.StandardPixmap.SP_MediaPlay
         )
+        self.play_button.setIcon(self.style().standardIcon(icon))
+
+    def _update_video_placeholder(
+        self, status: QMediaPlayer.MediaStatus
+    ) -> None:
+        if status in (
+            QMediaPlayer.MediaStatus.LoadingMedia,
+            QMediaPlayer.MediaStatus.BufferingMedia,
+            QMediaPlayer.MediaStatus.StalledMedia,
+        ):
+            self.video_placeholder_item.setText("正在加载视频…")
+            self.video_placeholder_item.setVisible(True)
+        elif status == QMediaPlayer.MediaStatus.NoMedia:
+            self.video_placeholder_item.setText("导入视频后开始标注")
+            self.video_placeholder_item.setVisible(True)
+        elif status in (
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+            QMediaPlayer.MediaStatus.EndOfMedia,
+        ):
+            self.video_placeholder_item.setVisible(False)
+        elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.video_placeholder_item.setText("无法加载视频")
+            self.video_placeholder_item.setVisible(True)
+        self._resize_video_item()
 
     def _media_error(self, _error: QMediaPlayer.Error, text: str) -> None:
         if text:

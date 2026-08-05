@@ -13,6 +13,7 @@ from PySide6.QtCore import (
     Qt,
 )
 from PySide6.QtGui import QKeySequence
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -40,6 +41,19 @@ try:
     from video_labeler.ui.main_window import MainWindow
 except ImportError:
     MainWindow = None
+
+
+APPROVED_PLAYBACK_RATE_ITEMS = [
+    "0.25x",
+    "0.5x",
+    "0.75x",
+    "1.0x",
+    "1.5x",
+    "2.0x",
+    "3.0x",
+    "4.0x",
+    "自定义",
+]
 
 
 @pytest.fixture(scope="module")
@@ -1583,18 +1597,10 @@ def test_editable_metadata_combos_include_custom_action(qt_app):
         "encode",
         "copy",
     ]
-    assert [window.speed_combo.itemText(index) for index in range(window.speed_combo.count())] == [
-        "0.25x",
-        "0.5x",
-        "0.75x",
-        "1.0x",
-        "1.25x",
-        "1.5x",
-        "2.0x",
-        "3.0x",
-        "4.0x",
-        "自定义",
-    ]
+    assert [
+        window.speed_combo.itemText(index)
+        for index in range(window.speed_combo.count())
+    ] == APPROVED_PLAYBACK_RATE_ITEMS
 
 
 def test_playback_rate_controls_apply_presets_and_custom_values(qt_app):
@@ -1603,18 +1609,7 @@ def test_playback_rate_controls_apply_presets_and_custom_values(qt_app):
     assert [
         window.speed_combo.itemText(index)
         for index in range(window.speed_combo.count())
-    ] == [
-        "0.25x",
-        "0.5x",
-        "0.75x",
-        "1.0x",
-        "1.25x",
-        "1.5x",
-        "2.0x",
-        "3.0x",
-        "4.0x",
-        "自定义",
-    ]
+    ] == APPROVED_PLAYBACK_RATE_ITEMS
     assert window.custom_speed_spin.minimum() == pytest.approx(0.1)
     assert window.custom_speed_spin.maximum() == pytest.approx(4.0)
 
@@ -1622,12 +1617,14 @@ def test_playback_rate_controls_apply_presets_and_custom_values(qt_app):
 
     assert window.player.playbackRate() == pytest.approx(1.5)
     assert window.custom_speed_spin.value() == pytest.approx(1.5)
+    assert window.playback_rate_badge.text() == "1.5x"
 
     window.custom_speed_spin.setValue(1.7)
     window._on_custom_speed_committed()
 
     assert window.player.playbackRate() == pytest.approx(1.7)
     assert window.speed_combo.currentText() == "自定义"
+    assert window.playback_rate_badge.text() == "1.7x"
 
 
 def test_invalid_playback_rate_restores_the_last_valid_value(qt_app):
@@ -1955,6 +1952,142 @@ def test_card_workspace_uses_semantic_cards_without_overlapping_video_controls(
         window.video_widget.geometry().bottom()
     )
     assert window.video_panel.graphicsEffect() is not None
+
+
+def test_refined_visual_sections_keep_existing_controls_semantic(qt_app):
+    window = MainWindow()
+    window.show()
+    qt_app.processEvents()
+
+    assert window.import_action_group.objectName() == "importActionGroup"
+    assert window.csv_action_group.objectName() == "csvActionGroup"
+    assert window.export_action_group.objectName() == "exportActionGroup"
+    assert window.settings_action_group.objectName() == "settingsActionGroup"
+    assert window.playback_rate_badge.objectName() == "playbackRateBadge"
+    assert window.table_filter_bar.objectName() == "tableFilterBar"
+    assert window.table_action_bar.objectName() == "tableActionBar"
+    assert window.task_table.alternatingRowColors()
+    assert all(
+        not button.icon().isNull()
+        for button in (
+            window.play_button,
+            window.seek_back_button,
+            window.seek_forward_button,
+        )
+    )
+
+
+def test_video_scene_overlay_tracks_empty_loading_and_loaded_states(qt_app):
+    window = MainWindow()
+    window.resize(1280, 900)
+    window.show()
+    qt_app.processEvents()
+
+    overlay = window.video_placeholder_item
+    assert overlay.isVisible()
+    assert overlay.text() == "导入视频后开始标注"
+
+    window._update_video_placeholder(QMediaPlayer.MediaStatus.LoadingMedia)
+    assert overlay.isVisible()
+    assert overlay.text() == "正在加载视频…"
+
+    window._update_video_placeholder(QMediaPlayer.MediaStatus.LoadedMedia)
+    assert not overlay.isVisible()
+
+    window._resize_video_item()
+    overlay_center = overlay.pos() + overlay.boundingRect().center()
+    scene_center = window.video_scene.sceneRect().center()
+    assert overlay_center.x() == pytest.approx(scene_center.x(), abs=1.0)
+    assert overlay_center.y() == pytest.approx(scene_center.y(), abs=1.0)
+
+
+@pytest.mark.parametrize(("width", "height"), ((1120, 720), (1440, 900)))
+def test_refined_video_controls_fit_without_text_clipping(qt_app, width, height):
+    window = MainWindow()
+    window.resize(width, height)
+    window.show()
+    qt_app.processEvents()
+
+    controls = (
+        window.play_button,
+        window.seek_back_button,
+        window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
+        window.playback_rate_badge,
+        window.speed_combo,
+        window.custom_speed_spin,
+    )
+    parent_rect = window.video_controls_panel.contentsRect()
+
+    assert window.video_controls_panel.geometry().top() > (
+        window.video_widget.geometry().bottom()
+    )
+    assert all(
+        control.width() >= control.sizeHint().width()
+        and parent_rect.contains(control.geometry())
+        for control in controls
+    )
+
+
+@pytest.mark.parametrize(("width", "height"), ((1120, 720), (1440, 900)))
+def test_refined_workspace_does_not_clip_header_or_annotation_actions(
+    qt_app, width, height
+):
+    window = MainWindow()
+    window.resize(width, height)
+    window.show()
+    qt_app.processEvents()
+
+    viewport = window.main_content_scroll.viewport()
+    annotation_rect = window.annotation_panel.contentsRect()
+    header_rect = window.project_header.contentsRect()
+    annotation_actions = (
+        window.add_button,
+        window.remove_button,
+        window.undo_button,
+        window.redo_button,
+        window.clear_button,
+    )
+    table_filter_controls = (
+        window.behavior_filter_combo,
+        window.polarity_filter_combo,
+        window.status_filter_combo,
+        window.sort_combo,
+        window.clear_filters_button,
+    )
+    table_action_controls = (
+        window.batch_edit_button,
+        window.batch_delete_button,
+        window.detach_table_button,
+    )
+
+    assert window.workspace_content.width() <= viewport.width()
+    assert window.editor_splitter.width() <= viewport.width()
+    assert window.editor_splitter.orientation() == (
+        Qt.Orientation.Vertical
+        if width < 1280
+        else Qt.Orientation.Horizontal
+    )
+    assert all(
+        button.width() >= button.sizeHint().width()
+        and annotation_rect.contains(button.geometry())
+        for button in annotation_actions
+    )
+    assert all(
+        control.width() >= control.sizeHint().width()
+        and window.table_filter_bar.contentsRect().contains(control.geometry())
+        for control in table_filter_controls
+    )
+    assert all(
+        control.width() >= control.sizeHint().width()
+        and window.table_action_bar.contentsRect().contains(control.geometry())
+        for control in table_action_controls
+    )
+    assert header_rect.contains(window.import_action_group.geometry())
+    assert header_rect.contains(window.csv_action_group.geometry())
+    assert header_rect.contains(window.export_action_group.geometry())
+    assert header_rect.contains(window.settings_action_group.geometry())
 
 
 def test_task_table_defaults_to_bottom_card_and_can_detach_and_restore(qt_app):
