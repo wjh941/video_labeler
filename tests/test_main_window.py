@@ -86,10 +86,13 @@ def _add_valid_clip(window: MainWindow, *, start: float, end: float, behavior: s
     window.add_or_update_clip()
 
 
-def _wait_for_content_animation(qt_app, window: MainWindow) -> None:
+def _wait_for_content_animation(
+    qt_app, window: MainWindow, group: CollapsibleGroupBox | None = None
+) -> None:
+    group = group or window.behaviors_group
     for _ in range(100):
         qt_app.processEvents()
-        if window.behaviors_group._animation.state() != QAbstractAnimation.State.Running:
+        if group._animation.state() != QAbstractAnimation.State.Running:
             return
         QTest.qWait(5)
     pytest.fail("行为标签折叠动画未完成")
@@ -1985,6 +1988,27 @@ def test_importing_video_keeps_fixed_screen_workspace_unclipped(qt_app, tmp_path
     assert window.annotation_workspace.isVisible()
 
 
+def test_collapsing_task_table_releases_right_pane_height_after_loading_source(
+    qt_app, tmp_path
+):
+    window = MainWindow()
+    window.resize(1120, 720)
+    window.show()
+    window.set_source_path(tmp_path / "source.mp4")
+    qt_app.processEvents()
+
+    window.task_panel.setChecked(False)
+    _wait_for_content_animation(qt_app, window, window.task_panel)
+    qt_app.processEvents()
+
+    workspace_rect = window.annotation_workspace.contentsRect()
+    annotation_rect = window.annotation_panel.geometry()
+    task_rect = window.task_panel.geometry()
+    assert workspace_rect.contains(annotation_rect)
+    assert workspace_rect.contains(task_rect)
+    assert task_rect.height() < 100
+
+
 def test_workspace_uses_two_parallel_panels(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
@@ -2088,6 +2112,16 @@ def test_lighting_and_polarity_use_independent_collapsible_groups(qt_app):
     assert window.polarity_group.isCheckable()
     assert not window.lighting_group.isChecked()
     assert not window.polarity_group.isChecked()
+
+
+def test_lighting_and_polarity_titles_summarize_selected_values(qt_app):
+    window = MainWindow()
+
+    window.lighting_combo.setCurrentText("night_full_color")
+    window.polarity_combo.setCurrentText("neg")
+
+    assert window.lighting_group.title() == "光照条件：night_full_color"
+    assert window.polarity_group.title() == "正负例：neg"
 
 
 def test_output_path_is_elided_with_a_full_path_tooltip(qt_app):

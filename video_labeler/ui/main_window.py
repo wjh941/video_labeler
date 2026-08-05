@@ -412,7 +412,9 @@ class MainWindow(QMainWindow):
         self.annotation_panel.setObjectName("annotationCard")
         self.task_panel = self._build_task_table()
         self.task_panel.setObjectName("taskCard")
-        self.task_panel.setMinimumHeight(320)
+        self.task_panel._animation.finished.connect(
+            self._restore_task_table_content_minimum
+        )
         self.annotation_workspace_layout.addWidget(self.annotation_panel)
         self.annotation_workspace_layout.addWidget(self.task_panel, 1)
 
@@ -952,6 +954,7 @@ class MainWindow(QMainWindow):
         polarity_layout.addWidget(polarity_content)
         self.polarity_group.set_content(polarity_content)
         layout.addWidget(self.polarity_group)
+        self._update_label_group_titles()
 
         layout.addWidget(QLabel("生成的文件名"))
         self.filename_preview = QLineEdit()
@@ -1039,6 +1042,14 @@ class MainWindow(QMainWindow):
                 checkbox.setChecked(behavior in selected)
         self._update_filename_preview()
 
+    def _update_label_group_titles(self) -> None:
+        self.lighting_group.setTitle(
+            f"光照条件：{self.lighting_combo.currentText()}"
+        )
+        self.polarity_group.setTitle(
+            f"正负例：{self.polarity_combo.currentText()}"
+        )
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "output_folder_label"):
@@ -1077,6 +1088,8 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding,
         )
         content = QWidget()
+        content.setMinimumHeight(280)
+        self.task_panel_content = content
         layout = QVBoxLayout(content)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
@@ -1186,6 +1199,10 @@ class MainWindow(QMainWindow):
         group_layout.addWidget(content)
         group.set_content(content)
         return group
+
+    def _restore_task_table_content_minimum(self) -> None:
+        if self.task_panel.isChecked():
+            self.task_panel_content.setMinimumHeight(280)
 
     def _show_task_table_dialog(self) -> None:
         if self.task_panel.parentWidget() is self.task_table_dialog:
@@ -1364,6 +1381,8 @@ class MainWindow(QMainWindow):
         )
         self.polarity_combo.currentTextChanged.connect(self._update_filename_preview)
         self.lighting_combo.currentTextChanged.connect(self._update_filename_preview)
+        self.polarity_combo.currentTextChanged.connect(self._update_label_group_titles)
+        self.lighting_combo.currentTextChanged.connect(self._update_label_group_titles)
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
         self.add_custom_behavior_tag_button.clicked.connect(
             self.add_custom_behavior_tag
