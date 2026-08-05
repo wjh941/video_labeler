@@ -25,6 +25,8 @@ from PySide6.QtGui import (
     QPalette,
     QPen,
     QShortcut,
+    QStandardItem,
+    QStandardItemModel,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
@@ -41,7 +43,6 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QGraphicsScene,
     QGraphicsView,
-    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -60,7 +61,6 @@ from PySide6.QtWidgets import (
     QStyle,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -109,7 +109,6 @@ TABLE_COLUMNS = (
     "状态",
     "错误信息",
 )
-BEHAVIOR_COLUMN_PADDING = 16
 CUSTOM_OPTION_TEXT = "自定义..."
 CUSTOM_PLAYBACK_RATE_TEXT = "自定义"
 PLAYBACK_RATE_PRESETS = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
@@ -231,30 +230,88 @@ class CollapsibleGroupBox(QGroupBox):
         painter.drawLine(3, 0, -3, 5)
 
 
-class RemovableBehaviorCheckBox(QCheckBox):
-    removeRequested = Signal(str)
+class BehaviorTagComboBox(QComboBox):
+    """A compact, checkable tag picker that retains multi-tag selection."""
 
-    def __init__(self, tag: str, parent: QWidget | None = None) -> None:
-        super().__init__(tag, parent)
-        self.setObjectName("customBehaviorTag")
-        self._remove_button = QToolButton(self)
-        self._remove_button.setText("x")
-        self._remove_button.setObjectName("customTagDeleteButton")
-        self._remove_button.setAccessibleName("删除自定义标签")
-        self._remove_button.setToolTip("删除自定义标签")
-        self._remove_button.setAutoRaise(True)
-        self._remove_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._remove_button.clicked.connect(
-            lambda: self.removeRequested.emit(self.text())
+    selectionChanged = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("behaviorTagCombo")
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setPlaceholderText("请选择行为标签")
+        self.setModel(QStandardItemModel(self))
+        self.view().pressed.connect(self._toggle_index)
+
+    def set_tags(
+        self,
+        tags: Collection[str],
+        selected: Collection[str],
+    ) -> None:
+        selected_tags = set(selected)
+        model = self.model()
+        assert isinstance(model, QStandardItemModel)
+        model.clear()
+        for tag in tags:
+            item = QStandardItem(tag)
+            item.setData(tag, Qt.ItemDataRole.UserRole)
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if tag in selected_tags
+                else Qt.CheckState.Unchecked
+            )
+            model.appendRow(item)
+        self.setMaxVisibleItems(max(1, model.rowCount()))
+        self.setCurrentIndex(-1)
+        self._update_summary()
+
+    def checked_tags(self) -> tuple[str, ...]:
+        model = self.model()
+        assert isinstance(model, QStandardItemModel)
+        return tuple(
+            str(item.data(Qt.ItemDataRole.UserRole))
+            for row in range(model.rowCount())
+            if (item := model.item(row)).checkState()
+            == Qt.CheckState.Checked
         )
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        button_size = self._remove_button.sizeHint()
-        self._remove_button.resize(button_size)
-        self._remove_button.move(
-            max(0, self.width() - button_size.width() - 3),
-            2,
+    def set_tag_checked(self, tag: str, checked: bool) -> None:
+        index = self.findData(tag)
+        if index < 0:
+            return
+        model = self.model()
+        assert isinstance(model, QStandardItemModel)
+        item = model.item(index)
+        target_state = (
+            Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        )
+        if item.checkState() == target_state:
+            return
+        item.setCheckState(target_state)
+        self._update_summary()
+        self.selectionChanged.emit()
+
+    def _toggle_index(self, index) -> None:
+        if not index.isValid():
+            return
+        model = self.model()
+        assert isinstance(model, QStandardItemModel)
+        item = model.item(index.row())
+        self.set_tag_checked(
+            str(item.data(Qt.ItemDataRole.UserRole)),
+            item.checkState() != Qt.CheckState.Checked,
+        )
+        QTimer.singleShot(0, self.showPopup)
+
+    def _update_summary(self) -> None:
+        selected_count = len(self.checked_tags())
+        self.setEditText(
+            f"已选 {selected_count} 项" if selected_count else "请选择行为标签"
         )
 
 
@@ -329,8 +386,6 @@ class MainWindow(QMainWindow):
         self.project_header = self._build_project_header()
         content_layout.addWidget(self.project_header)
 
-        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.workspace_splitter.setChildrenCollapsible(False)
         self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.editor_splitter.setChildrenCollapsible(False)
         self.video_panel = self._build_video_panel()
@@ -348,20 +403,23 @@ class MainWindow(QMainWindow):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.annotation_scroll.installEventFilter(self)
-        self.editor_splitter.addWidget(self.annotation_scroll)
-        self._set_annotation_minimum_width()
-        self.editor_splitter.setSizes([840, 600])
-        self.editor_splitter.setMinimumHeight(560)
-
-        self.workspace_splitter.addWidget(self.editor_splitter)
         self.task_panel = self._build_task_table()
         self.task_panel.setObjectName("taskCard")
         self.task_panel.setMinimumHeight(320)
+        self.workspace_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.addWidget(self.annotation_scroll)
         self.workspace_splitter.addWidget(self.task_panel)
-        self.workspace_splitter.setMinimumHeight(892)
-        self.workspace_splitter.setSizes([560, 320])
+        self.workspace_splitter.setMinimumWidth(420)
+        self.workspace_splitter.setSizes([470, 360])
         self.workspace_splitter.setStretchFactor(0, 3)
         self.workspace_splitter.setStretchFactor(1, 2)
+        self.editor_splitter.addWidget(self.workspace_splitter)
+        self._set_annotation_minimum_width()
+        self.editor_splitter.setSizes([550, 450])
+        self.editor_splitter.setStretchFactor(0, 11)
+        self.editor_splitter.setStretchFactor(1, 9)
+        self.editor_splitter.setMinimumHeight(560)
 
         self.task_table_dialog = QDialog(self)
         self.task_table_dialog.setWindowTitle("片段任务")
@@ -371,7 +429,7 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.setLayout(QVBoxLayout())
         self.task_table_dialog.finished.connect(self._restore_task_panel)
 
-        content_layout.addWidget(self.workspace_splitter, stretch=1)
+        content_layout.addWidget(self.editor_splitter, stretch=1)
         content_layout.addLayout(self._build_export_status())
 
         for card in (
@@ -800,25 +858,58 @@ class MainWindow(QMainWindow):
         self.behaviors_group = CollapsibleGroupBox("行为标签")
         self.behaviors_group.setObjectName("collapsibleBehaviorGroup")
         self.behavior_checks_container = QWidget()
-        self.behavior_checks_container.installEventFilter(self)
-        self.behavior_checks_layout = QGridLayout(self.behavior_checks_container)
-        self.behavior_checks_layout.setContentsMargins(0, 0, 0, 0)
-        self.behavior_checks_layout.setHorizontalSpacing(10)
-        self.behavior_checks_layout.setVerticalSpacing(4)
-        self.behavior_columns = 2
-        self._behavior_reflow_pending = False
+        behavior_content_layout = QVBoxLayout(self.behavior_checks_container)
+        behavior_content_layout.setContentsMargins(0, 0, 0, 0)
+        behavior_content_layout.setSpacing(8)
+        self.behavior_tag_combo = BehaviorTagComboBox()
+        behavior_content_layout.addWidget(self.behavior_tag_combo)
+        self.historical_tags_container = QWidget()
+        self.historical_tags_layout = QHBoxLayout(
+            self.historical_tags_container
+        )
+        self.historical_tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.historical_tags_layout.setSpacing(6)
+        behavior_content_layout.addWidget(self.historical_tags_container)
+        self.historical_tags_container.setVisible(False)
 
         behaviors_layout = QVBoxLayout(self.behaviors_group)
         behaviors_layout.setContentsMargins(6, 6, 6, 6)
-        self.custom_behavior_tag_edit = QLineEdit()
-        self.custom_behavior_tag_edit.setPlaceholderText("输入英文自定义行为标签")
-        self.add_custom_behavior_tag_button = QPushButton("添加")
-        self.add_custom_behavior_tag_button.setObjectName("secondaryButton")
         behaviors_layout.addWidget(self.behavior_checks_container)
         self.behaviors_group.set_content(self.behavior_checks_container)
 
         self._rebuild_behavior_controls()
         layout.addWidget(self.behaviors_group)
+
+        self.custom_tags_group = CollapsibleGroupBox("自定义字段")
+        custom_tags_content = QWidget()
+        custom_tags_layout = QVBoxLayout(custom_tags_content)
+        custom_tags_layout.setContentsMargins(0, 0, 0, 0)
+        custom_tags_layout.setSpacing(8)
+        add_custom_tag_layout = QHBoxLayout()
+        self.custom_behavior_tag_edit = QLineEdit()
+        self.custom_behavior_tag_edit.setPlaceholderText("输入英文自定义行为标签")
+        self.add_custom_behavior_tag_button = QPushButton("添加")
+        self.add_custom_behavior_tag_button.setObjectName("secondaryButton")
+        add_custom_tag_layout.addWidget(self.custom_behavior_tag_edit, stretch=1)
+        add_custom_tag_layout.addWidget(self.add_custom_behavior_tag_button)
+        custom_tags_layout.addLayout(add_custom_tag_layout)
+        remove_custom_tag_layout = QHBoxLayout()
+        self.custom_tag_library_combo = QComboBox()
+        self.custom_tag_library_combo.setObjectName("customTagLibraryCombo")
+        self.remove_custom_behavior_tag_button = QPushButton("删除标签")
+        self.remove_custom_behavior_tag_button.setObjectName("dangerButton")
+        self.remove_custom_behavior_tag_button.setEnabled(False)
+        remove_custom_tag_layout.addWidget(self.custom_tag_library_combo, stretch=1)
+        remove_custom_tag_layout.addWidget(
+            self.remove_custom_behavior_tag_button
+        )
+        custom_tags_layout.addLayout(remove_custom_tag_layout)
+        custom_tags_group_layout = QVBoxLayout(self.custom_tags_group)
+        custom_tags_group_layout.setContentsMargins(6, 6, 6, 6)
+        custom_tags_group_layout.addWidget(custom_tags_content)
+        self.custom_tags_group.set_content(custom_tags_content)
+        layout.addWidget(self.custom_tags_group)
+        self._sync_custom_tag_library()
 
         labels_form = QFormLayout()
         self.polarity_combo = QComboBox()
@@ -890,19 +981,21 @@ class MainWindow(QMainWindow):
         )
         self.behavior_checks.clear()
         self.historical_tag_labels.clear()
-
+        self.behavior_tag_combo.set_tags(available_tags, selected_tags)
         for behavior in available_tags:
-            checkbox: QCheckBox
-            if behavior in BEHAVIOR_LABELS:
-                checkbox = QCheckBox(behavior)
-                checkbox.setObjectName("behaviorTag")
-            else:
-                checkbox = RemovableBehaviorCheckBox(behavior)
-                checkbox.removeRequested.connect(self._remove_custom_behavior_tag)
+            checkbox = QCheckBox(behavior)
             checkbox.setChecked(behavior in selected_tags)
-            checkbox.toggled.connect(self._update_filename_preview)
+            checkbox.toggled.connect(
+                lambda checked, tag=behavior: self.behavior_tag_combo.set_tag_checked(
+                    tag, checked
+                )
+            )
             self.behavior_checks[behavior] = checkbox
 
+        while self.historical_tags_layout.count():
+            item = self.historical_tags_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().setParent(None)
         for behavior in self.historical_behavior_tags:
             label = QLabel(behavior)
             label.setObjectName("historicalBehaviorTag")
@@ -912,170 +1005,59 @@ class MainWindow(QMainWindow):
                 "data remains inside this segment, cannot reuse via button"
             )
             self.historical_tag_labels[behavior] = label
-
-        self._reflow_behavior_checks()
+            self.historical_tags_layout.addWidget(label)
+        self.historical_tags_layout.addStretch(1)
+        self.historical_tags_container.setVisible(
+            bool(self.historical_behavior_tags)
+        )
+        if hasattr(self, "custom_tag_library_combo"):
+            self._sync_custom_tag_library()
         if hasattr(self, "behavior_filter_combo"):
             self._sync_filter_options()
 
-    def _behavior_grid_widgets(self) -> list[QWidget]:
-        return [
-            *self.behavior_checks.values(),
-            *self.historical_tag_labels.values(),
-        ]
+    def _sync_custom_tag_library(self) -> None:
+        selected_tag = self.custom_tag_library_combo.currentData()
+        with QSignalBlocker(self.custom_tag_library_combo):
+            self.custom_tag_library_combo.clear()
+            if self.project.custom_behavior_tags:
+                for tag in self.project.custom_behavior_tags:
+                    self.custom_tag_library_combo.addItem(tag, tag)
+                index = self.custom_tag_library_combo.findData(selected_tag)
+                self.custom_tag_library_combo.setCurrentIndex(
+                    index if index >= 0 else 0
+                )
+            else:
+                self.custom_tag_library_combo.addItem("暂无自定义标签", None)
+        self.remove_custom_behavior_tag_button.setEnabled(
+            bool(self.project.custom_behavior_tags)
+        )
 
-    def _reflow_behavior_checks(self) -> None:
-        self._behavior_reflow_pending = False
-        available_width = self.behavior_checks_container.width()
-        if available_width <= 0:
-            available_width = self.behavior_checks_container.sizeHint().width()
-        widgets = self._behavior_grid_widgets()
-        columns, column_widths = self._behavior_layout_for_width(
-            available_width, widgets
-        )
-        self.behavior_columns = columns
-        for widget in widgets:
-            widget.setSizePolicy(
-                QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
-            )
-        while self.behavior_checks_layout.count():
-            item = self.behavior_checks_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().setParent(None)
-        for column in range(3):
-            self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
-            self.behavior_checks_layout.setColumnStretch(column, 0)
-        for index, widget in enumerate(widgets):
-            row, column = divmod(index, columns)
-            self.behavior_checks_layout.addWidget(widget, row, column)
-        tag_rows = (len(widgets) + columns - 1) // columns
-        self.behavior_checks_layout.addWidget(
-            self.custom_behavior_tag_edit,
-            tag_rows,
-            0,
-            1,
-            max(1, columns - 1),
-        )
-        self.behavior_checks_layout.addWidget(
-            self.add_custom_behavior_tag_button,
-            tag_rows,
-            columns - 1,
-        )
-        for column in range(columns):
-            self.behavior_checks_layout.setColumnMinimumWidth(
-                column, column_widths[column]
-            )
-            self.behavior_checks_layout.setColumnStretch(column, 1)
-        self.behavior_checks_container.updateGeometry()
-        self.behaviors_group.updateGeometry()
-        if self.behaviors_group.isChecked():
-            QTimer.singleShot(0, self._restore_behavior_content_height)
-
-    def _behavior_layout_for_width(
-        self,
-        available_width: int,
-        widgets: Sequence[QWidget] | None = None,
-    ) -> tuple[int, list[int]]:
-        grid_widgets = list(widgets or self._behavior_grid_widgets())
-        two_column_widths = self._behavior_column_widths(grid_widgets, 2)
-        three_column_widths = self._behavior_column_widths(grid_widgets, 3)
-        three_column_width = self._behavior_grid_minimum_width(
-            three_column_widths
-        )
-        if available_width >= three_column_width:
-            return 3, three_column_widths
-        return 2, two_column_widths
+    def _sync_behavior_selection_from_combo(self) -> None:
+        selected = set(self.behavior_tag_combo.checked_tags())
+        for behavior, checkbox in self.behavior_checks.items():
+            with QSignalBlocker(checkbox):
+                checkbox.setChecked(behavior in selected)
+        self._update_filename_preview()
 
     def _set_annotation_minimum_width(self) -> None:
-        """Keep the non-scrollable tag grid wide enough for two full columns."""
-        two_column_widths = self._behavior_column_widths(
-            self._behavior_grid_widgets(), 2
-        )
-        self.behavior_checks_container.setMinimumWidth(
-            self._behavior_grid_minimum_width(two_column_widths)
-        )
-        self.behavior_checks_container.updateGeometry()
-        self.behaviors_group.updateGeometry()
-        self.annotation_panel.updateGeometry()
-        self.annotation_scroll.setMinimumWidth(
-            self.annotation_panel.minimumSizeHint().width()
-            + self.annotation_scroll.frameWidth() * 2
-        )
-
-    def _behavior_grid_minimum_width(self, column_widths: list[int]) -> int:
-        spacing = self.behavior_checks_layout.horizontalSpacing()
-        return sum(column_widths) + spacing * (len(column_widths) - 1)
-
-    @staticmethod
-    def _behavior_column_widths(
-        checks: Sequence[QWidget], columns: int
-    ) -> list[int]:
-        column_widths = [0] * columns
-        for index, checkbox in enumerate(checks):
-            column = index % columns
-            column_widths[column] = max(
-                column_widths[column],
-                checkbox.sizeHint().width() + BEHAVIOR_COLUMN_PADDING,
-            )
-        return column_widths
-
-    def _schedule_behavior_reflow(self) -> None:
-        if self._behavior_reflow_pending:
-            return
-        self._behavior_reflow_pending = True
-        QTimer.singleShot(0, self._reflow_behavior_checks)
-
-    def _release_behavior_width_constraints(self) -> None:
-        for column in range(3):
-            self.behavior_checks_layout.setColumnMinimumWidth(column, 0)
-        for widget in self._behavior_grid_widgets():
-            widget.setSizePolicy(
-                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
-            )
-        self.behavior_checks_container.updateGeometry()
-        self.behaviors_group.updateGeometry()
-
-    def _restore_behavior_content_height(self) -> None:
-        if (
-            self.behaviors_group.isChecked()
-            and self.behaviors_group._animation.state()
-            != QAbstractAnimation.State.Running
-        ):
-            self.behavior_checks_container.setMaximumHeight(
-                CollapsibleGroupBox._UNRESTRICTED_HEIGHT
-            )
-            self.behavior_checks_container.setMinimumHeight(
-                self.behavior_checks_container.sizeHint().height()
-            )
+        """Keep the compact annotation form usable beside the video panel."""
+        self.annotation_scroll.setMinimumWidth(420)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "output_folder_label"):
             self._set_output_folder_display()
-        if hasattr(self, "behavior_checks_layout"):
+        if hasattr(self, "editor_splitter"):
             self._update_editor_splitter_orientation()
-            self._schedule_behavior_reflow()
 
     def _update_editor_splitter_orientation(self) -> None:
-        """Stack the existing panels before either one can be horizontally cut."""
+        """Keep the video and annotation workspaces side by side."""
         if not hasattr(self, "editor_splitter"):
             return
-        available_width = self.main_content_scroll.viewport().width()
-        if available_width <= 0:
-            available_width = self.width()
-        should_stack = available_width < 1280
-        if should_stack == self._editor_splitter_stacked:
-            return
-
-        self._editor_splitter_stacked = should_stack
-        self.editor_splitter.setOrientation(
-            Qt.Orientation.Vertical
-            if should_stack
-            else Qt.Orientation.Horizontal
-        )
-        self.editor_splitter.setSizes(
-            [680, 560] if should_stack else [840, 600]
-        )
-        self._release_behavior_width_constraints()
+        self._editor_splitter_stacked = False
+        if self.editor_splitter.orientation() != Qt.Orientation.Horizontal:
+            self.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
+            self.editor_splitter.setSizes([550, 450])
 
     def _resize_video_item(self) -> None:
         if not hasattr(self, "video_viewport"):
@@ -1100,11 +1082,6 @@ class MainWindow(QMainWindow):
             return super().eventFilter(watched, event)
         if watched is getattr(self, "main_content_viewport", None):
             self._update_editor_splitter_orientation()
-        elif watched is getattr(self, "annotation_scroll", None):
-            self._release_behavior_width_constraints()
-            self._schedule_behavior_reflow()
-        elif watched is getattr(self, "behavior_checks_container", None):
-            self._schedule_behavior_reflow()
         elif watched is getattr(self, "video_viewport", None):
             self._resize_video_item()
         return super().eventFilter(watched, event)
@@ -1145,9 +1122,9 @@ class MainWindow(QMainWindow):
 
         self.table_filter_bar = QWidget()
         self.table_filter_bar.setObjectName("tableFilterBar")
-        filter_layout = QHBoxLayout(self.table_filter_bar)
+        filter_layout = QVBoxLayout(self.table_filter_bar)
         filter_layout.setContentsMargins(8, 6, 8, 6)
-        filter_layout.setSpacing(8)
+        filter_layout.setSpacing(6)
         self.batch_edit_button = QPushButton("批量修改选中片段")
         self.batch_delete_button = QPushButton("批量删除选中")
         self.batch_delete_button.setObjectName("dangerButton")
@@ -1159,6 +1136,10 @@ class MainWindow(QMainWindow):
             self.behavior_filter_combo.setCurrentIndex(
                 self.behavior_filter_combo.findData(value)
             )
+        )
+        self.behavior_filter_combo.setMinimumContentsLength(10)
+        self.behavior_filter_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
         self._set_combo_visible_item_count(self.behavior_filter_combo)
         self.polarity_filter_combo = QComboBox()
@@ -1176,14 +1157,26 @@ class MainWindow(QMainWindow):
         self.sort_combo.addItem("时长降序", ("duration", True))
         self.clear_filters_button = QPushButton("清空筛选")
 
-        filter_layout.addWidget(QLabel("筛选"))
-        filter_layout.addWidget(self.behavior_filter_combo)
-        filter_layout.addWidget(self.polarity_filter_combo)
-        filter_layout.addWidget(self.status_filter_combo)
-        filter_layout.addWidget(QLabel("排序"))
-        filter_layout.addWidget(self.sort_combo)
-        filter_layout.addWidget(self.clear_filters_button)
-        filter_layout.addStretch(1)
+        self.table_filter_primary_row = QWidget()
+        primary_filter_layout = QHBoxLayout(self.table_filter_primary_row)
+        primary_filter_layout.setContentsMargins(0, 0, 0, 0)
+        primary_filter_layout.setSpacing(8)
+        primary_filter_layout.addWidget(QLabel("筛选"))
+        primary_filter_layout.addWidget(self.behavior_filter_combo, stretch=1)
+        primary_filter_layout.addWidget(self.polarity_filter_combo, stretch=1)
+        filter_layout.addWidget(self.table_filter_primary_row)
+
+        self.table_filter_secondary_row = QWidget()
+        secondary_filter_layout = QHBoxLayout(
+            self.table_filter_secondary_row
+        )
+        secondary_filter_layout.setContentsMargins(0, 0, 0, 0)
+        secondary_filter_layout.setSpacing(8)
+        secondary_filter_layout.addWidget(self.status_filter_combo, stretch=1)
+        secondary_filter_layout.addWidget(QLabel("排序"))
+        secondary_filter_layout.addWidget(self.sort_combo, stretch=1)
+        secondary_filter_layout.addWidget(self.clear_filters_button)
+        filter_layout.addWidget(self.table_filter_secondary_row)
         layout.addWidget(self.table_filter_bar)
 
         self.table_action_bar = QWidget()
@@ -1224,7 +1217,7 @@ class MainWindow(QMainWindow):
             dialog_layout.removeWidget(self.task_panel)
         self.task_panel.setParent(None)
         self.workspace_splitter.insertWidget(1, self.task_panel)
-        self.workspace_splitter.setSizes([560, 320])
+        self.workspace_splitter.setSizes([470, 360])
         self.task_panel.show()
 
     def _build_export_status(self) -> QHBoxLayout:
@@ -1367,9 +1360,6 @@ class MainWindow(QMainWindow):
         self.advanced_export_group.toggled.connect(
             self.advanced_export_content.setVisible
         )
-        self.editor_splitter.splitterMoved.connect(
-            lambda _position, _index: self._schedule_behavior_reflow()
-        )
 
         self.date_edit.textChanged.connect(self._update_filename_preview)
         self.camera_edit.textChanged.connect(self._update_filename_preview)
@@ -1377,6 +1367,9 @@ class MainWindow(QMainWindow):
         self.date_edit.textChanged.connect(self._mark_project_dirty)
         self.camera_edit.textChanged.connect(self._mark_project_dirty)
         self.view_combo.currentTextChanged.connect(self._mark_project_dirty)
+        self.behavior_tag_combo.selectionChanged.connect(
+            self._sync_behavior_selection_from_combo
+        )
         self.polarity_combo.currentTextChanged.connect(self._update_filename_preview)
         self.lighting_combo.currentTextChanged.connect(self._update_filename_preview)
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
@@ -1385,6 +1378,9 @@ class MainWindow(QMainWindow):
         )
         self.custom_behavior_tag_edit.returnPressed.connect(
             self.add_custom_behavior_tag
+        )
+        self.remove_custom_behavior_tag_button.clicked.connect(
+            self._remove_selected_custom_behavior_tag
         )
 
         self.add_button.clicked.connect(self.add_or_update_clip)
@@ -1867,13 +1863,13 @@ class MainWindow(QMainWindow):
         self.end_spin.setValue(end_seconds)
 
     def selected_behaviors(self) -> tuple[str, ...]:
-        selected = [
-            behavior
-            for behavior, checkbox in self.behavior_checks.items()
-            if checkbox.isChecked()
-        ]
         return tuple(
-            dict.fromkeys((*selected, *self.historical_behavior_tags))
+            dict.fromkeys(
+                (
+                    *self.behavior_tag_combo.checked_tags(),
+                    *self.historical_behavior_tags,
+                )
+            )
         )
 
     def add_custom_behavior_tag(self) -> None:
@@ -1954,6 +1950,11 @@ class MainWindow(QMainWindow):
         self.project.custom_behavior_tags.remove(tag)
         self._rebuild_behavior_controls(selected)
         self._mark_project_dirty()
+
+    def _remove_selected_custom_behavior_tag(self) -> None:
+        tag = self.custom_tag_library_combo.currentData()
+        if isinstance(tag, str):
+            self._remove_custom_behavior_tag(tag)
 
     def add_or_update_clip(self) -> None:
         try:

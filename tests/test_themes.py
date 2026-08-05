@@ -57,13 +57,14 @@ def test_light_theme_contains_card_workspace_selectors():
         "QLabel#playbackRateBadge",
         "QWidget#tableFilterBar",
         "QWidget#tableActionBar",
-        "QCheckBox#behaviorTag",
-        "QCheckBox#customBehaviorTag",
+        "QComboBox#behaviorTagCombo",
+        "QComboBox#customTagLibraryCombo",
         "QLabel#historicalBehaviorTag",
-        "QToolButton#customTagDeleteButton",
         "QTableWidget::item:alternate",
     ):
         assert selector in stylesheet
+    assert "QCheckBox#behaviorTag" not in stylesheet
+    assert "QCheckBox#customBehaviorTag" not in stylesheet
 
 
 def test_light_theme_contains_ant_desktop_tokens_and_eight_pixel_radius():

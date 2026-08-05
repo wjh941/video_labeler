@@ -73,15 +73,6 @@ def _add_valid_clip(window: MainWindow, *, start: float, end: float, behavior: s
     window.add_or_update_clip()
 
 
-def _process_behavior_reflow(qt_app, window: MainWindow) -> None:
-    for _ in range(20):
-        qt_app.processEvents()
-        if not window._behavior_reflow_pending:
-            qt_app.processEvents()
-            return
-    pytest.fail("行为标签布局未完成重排")
-
-
 def _wait_for_content_animation(qt_app, window: MainWindow) -> None:
     for _ in range(100):
         qt_app.processEvents()
@@ -89,71 +80,6 @@ def _wait_for_content_animation(qt_app, window: MainWindow) -> None:
             return
         QTest.qWait(5)
     pytest.fail("行为标签折叠动画未完成")
-
-
-def _behavior_column_widths(window: MainWindow, columns: int) -> list[int]:
-    widths = [0] * columns
-    for index, checkbox in enumerate(window.behavior_checks.values()):
-        column = index % columns
-        widths[column] = max(widths[column], checkbox.sizeHint().width() + 16)
-    return widths
-
-
-def _three_column_threshold(window: MainWindow) -> int:
-    widths = _behavior_column_widths(window, 3)
-    return sum(widths) + window.behavior_checks_layout.horizontalSpacing() * 2
-
-
-def _set_behavior_container_target_width(
-    qt_app, window: MainWindow, target_width: int
-) -> None:
-    for _ in range(3):
-        horizontal_overhead = max(
-            0,
-            window.annotation_scroll.width()
-            - window.behavior_checks_container.width(),
-        )
-        target_scroll_width = target_width + horizontal_overhead
-        splitter_content_width = sum(window.editor_splitter.sizes())
-        window.editor_splitter.setSizes(
-            [
-                max(1, splitter_content_width - target_scroll_width),
-                target_scroll_width,
-            ]
-        )
-        _process_behavior_reflow(qt_app, window)
-        if window.behavior_checks_container.width() == target_width:
-            return
-
-
-def _assert_visible_behavior_grid(window: MainWindow, expected_columns: int) -> None:
-    checks = list(window.behavior_checks.values())
-    container_origin = window.behavior_checks_container.mapTo(
-        window.annotation_scroll.viewport(), QPoint(0, 0)
-    )
-
-    assert window.behavior_columns == expected_columns
-    assert [
-        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
-        for column in range(expected_columns)
-    ] == list(BEHAVIOR_LABELS[:expected_columns])
-    assert container_origin.x() >= 0
-    assert (
-        container_origin.x() + window.behavior_checks_container.width()
-        <= window.annotation_scroll.viewport().width()
-    )
-    assert all(
-        checkbox.parentWidget() is window.behavior_checks_container
-        and checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in checks
-    )
-    assert not any(
-        checkbox.geometry().intersects(other.geometry())
-        for index, checkbox in enumerate(checks)
-        for other in checks[index + 1 :]
-    )
 
 
 def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
@@ -271,6 +197,35 @@ def test_collapsible_behavior_group(qt_app):
     QTest.qWait(350)
     assert window.behavior_checks_container.isVisible()
     assert window.behaviors_group.chevron_rotation == pytest.approx(90.0)
+
+
+def test_behavior_selector_holds_multiple_checked_tags(qt_app):
+    window = MainWindow()
+
+    window.behavior_tag_combo.set_tags(
+        ("dog_out", "fall", "delivery_dropoff"),
+        ("dog_out", "delivery_dropoff"),
+    )
+
+    assert window.behavior_tag_combo.checked_tags() == (
+        "dog_out",
+        "delivery_dropoff",
+    )
+    assert "2" in window.behavior_tag_combo.currentText()
+
+
+def test_behavior_selector_popup_contains_all_available_tags(qt_app):
+    window = MainWindow()
+    window.project.custom_behavior_tags.append("delivery_dropoff")
+
+    window._rebuild_behavior_controls(())
+
+    assert window.behavior_tag_combo.count() == len(
+        (*BEHAVIOR_LABELS, "delivery_dropoff")
+    )
+    assert window.behavior_tag_combo.itemText(
+        window.behavior_tag_combo.findData("delivery_dropoff")
+    ) == "delivery_dropoff"
 
 
 def test_main_window_uses_semantic_style_object_names(qt_app):
@@ -893,60 +848,25 @@ def test_automatic_backup_reports_project_validation_error(qt_app, tmp_path, mon
     assert statuses == ["自动备份失败：invalid project"]
 
 
-def test_tag_area_no_scrollbar(qt_app):
+def test_behavior_selector_is_compact_and_shows_all_popup_options(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
-    _process_behavior_reflow(qt_app, window)
+    qt_app.processEvents()
 
     assert not window.behaviors_group.findChildren(QScrollArea)
-    assert window.behavior_columns >= 2
-
-    window.resize(1120, 720)
-    qt_app.processEvents()
-    assert window.behavior_columns >= 2
+    assert window.behavior_tag_combo.maxVisibleItems() == (
+        window.behavior_tag_combo.count()
+    )
+    assert not window.behavior_tag_combo.view().isVisible()
+    assert not hasattr(window, "behavior_checks_layout")
 
     assert window.view_combo.maxVisibleItems() == window.view_combo.count()
     assert window.polarity_combo.maxVisibleItems() == window.polarity_combo.count()
     assert window.lighting_combo.maxVisibleItems() == window.lighting_combo.count()
 
 
-def test_behavior_checks_reflow_to_available_width_without_text_clipping(qt_app):
-    window = MainWindow()
-    window.resize(1440, 900)
-    window.show()
-    _process_behavior_reflow(qt_app, window)
-
-    assert not window.behaviors_group.findChildren(QScrollArea)
-    assert window.behavior_columns >= 2
-    assert all(
-        checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in window.behavior_checks.values()
-    )
-
-    window.resize(1280, 900)
-    _process_behavior_reflow(qt_app, window)
-    assert all(
-        checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in window.behavior_checks.values()
-    )
-
-    window.resize(1120, 720)
-    _process_behavior_reflow(qt_app, window)
-    assert window.behavior_columns >= 2
-    assert all(
-        checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in window.behavior_checks.values()
-    )
-
-
-def test_collapsible_behavior_group_recalculates_expanded_height_after_reflow(qt_app):
+def test_collapsible_behavior_group_restores_content_height_after_resize(qt_app):
     window = MainWindow()
     window.show()
     window.resize(1440, 900)
@@ -963,146 +883,6 @@ def test_collapsible_behavior_group_recalculates_expanded_height_after_reflow(qt
     assert window.behavior_checks_container.height() >= (
         window.behavior_checks_container.sizeHint().height()
     )
-
-
-def test_behavior_checks_reflow_after_annotation_splitter_moves(qt_app):
-    window = MainWindow()
-    window.resize(1920, 900)
-    window.show()
-    qt_app.processEvents()
-    window._editor_splitter_stacked = False
-    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
-
-    window.editor_splitter.setSizes([620, 1200])
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behavior_columns == 3
-    assert all(
-        checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in window.behavior_checks.values()
-    )
-
-    window.editor_splitter.setSizes([1354, 530])
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behavior_columns == 2
-    assert all(
-        checkbox.width() >= checkbox.sizeHint().width()
-        and checkbox.geometry().right()
-        < window.behavior_checks_container.width()
-        for checkbox in window.behavior_checks.values()
-    )
-
-
-def test_behavior_checks_keep_row_major_label_order_after_reflow(qt_app):
-    window = MainWindow()
-    window.resize(1920, 900)
-    window.show()
-    window.editor_splitter.setSizes([900, 984])
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behavior_columns == 3
-    assert [
-        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
-        for column in range(3)
-    ] == list(BEHAVIOR_LABELS[:3])
-
-    window.editor_splitter.setSizes([620, 1200])
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behavior_columns == 3
-    assert [
-        window.behavior_checks_layout.itemAtPosition(0, column).widget().text()
-        for column in range(3)
-    ] == list(BEHAVIOR_LABELS[:3])
-
-
-def test_behavior_checks_choose_two_columns_below_three_column_threshold(qt_app):
-    window = MainWindow()
-    three_column_threshold = _three_column_threshold(window)
-
-    columns, column_widths = window._behavior_layout_for_width(
-        three_column_threshold - 1
-    )
-
-    assert columns == 2
-    assert column_widths == _behavior_column_widths(window, 2)
-    assert all(
-        column_widths[index % columns] >= checkbox.sizeHint().width() + 16
-        for index, checkbox in enumerate(window.behavior_checks.values())
-    )
-
-
-def test_behavior_checks_choose_three_columns_at_three_column_threshold(qt_app):
-    window = MainWindow()
-    three_column_threshold = _three_column_threshold(window)
-
-    columns, column_widths = window._behavior_layout_for_width(
-        three_column_threshold
-    )
-
-    assert columns == 3
-    assert column_widths == _behavior_column_widths(window, 3)
-    assert all(
-        column_widths[index % columns] >= checkbox.sizeHint().width() + 16
-        for index, checkbox in enumerate(window.behavior_checks.values())
-    )
-
-
-def test_behavior_checks_splitter_reflow_preserves_two_and_three_column_grid(
-    qt_app,
-):
-    window = MainWindow()
-    window.resize(1920, 900)
-    window.show()
-    window._editor_splitter_stacked = False
-    window.editor_splitter.setOrientation(Qt.Orientation.Horizontal)
-    _process_behavior_reflow(qt_app, window)
-
-    three_column_threshold = _three_column_threshold(window)
-    two_column_threshold = sum(_behavior_column_widths(window, 2)) + (
-        window.behavior_checks_layout.horizontalSpacing()
-    )
-
-    for target_width, expected_columns in (
-        (three_column_threshold - 4, 2),
-        (three_column_threshold, 3),
-        (three_column_threshold + 4, 3),
-        (three_column_threshold - 4, 2),
-        (three_column_threshold + 4, 3),
-    ):
-        _set_behavior_container_target_width(qt_app, window, target_width)
-        assert window.behavior_checks_container.width() == target_width
-        _assert_visible_behavior_grid(window, expected_columns)
-
-    window.editor_splitter.setSizes([window.editor_splitter.width(), 1])
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behavior_checks_container.width() >= two_column_threshold
-    _assert_visible_behavior_grid(window, 2)
-
-
-def test_reflow_does_not_unrestrict_height_during_expand_animation(qt_app):
-    window = MainWindow()
-    window.show()
-    _process_behavior_reflow(qt_app, window)
-
-    window.behaviors_group.setChecked(False)
-    _wait_for_content_animation(qt_app, window)
-    window.behaviors_group.setChecked(True)
-    assert window.behaviors_group._animation.state() == QAbstractAnimation.State.Running
-
-    window._reflow_behavior_checks()
-    _process_behavior_reflow(qt_app, window)
-
-    assert window.behaviors_group._animation.state() == QAbstractAnimation.State.Running
-    assert window.behavior_checks_container.maximumHeight() != 16777215
-
-    _wait_for_content_animation(qt_app, window)
-
-    assert window.behavior_checks_container.maximumHeight() == 16777215
 
 
 def test_new_window_sizes_behavior_filter_to_all_options(qt_app):
@@ -1795,6 +1575,17 @@ def test_adding_custom_behavior_tag_partially_refreshes_editor_fields(
     assert window.lighting_combo.currentText() == "night_full_color"
 
 
+def test_custom_field_group_lists_added_tag_for_removal(qt_app):
+    window = MainWindow()
+
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+    window.add_custom_behavior_tag()
+
+    assert isinstance(window.custom_tags_group, CollapsibleGroupBox)
+    assert window.custom_tag_library_combo.currentData() == "delivery_dropoff"
+    assert window.remove_custom_behavior_tag_button.isEnabled()
+
+
 def test_loading_project_restores_custom_behavior_tag_buttons(qt_app, tmp_path):
     project_path = tmp_path / "work.labelproj"
     window = MainWindow()
@@ -2097,6 +1888,30 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
 
 
+def test_workspace_uses_two_parallel_panels_with_right_side_table(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
+    assert window.editor_splitter.widget(0) is window.video_panel
+    assert window.editor_splitter.widget(1) is window.workspace_splitter
+    assert window.workspace_splitter.widget(0) is window.annotation_scroll
+    assert window.workspace_splitter.widget(1) is window.task_panel
+
+
+def test_video_panel_receives_about_fifty_five_percent_of_workspace(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    left, right = window.editor_splitter.sizes()
+    assert left > right
+    assert left / (left + right) == pytest.approx(0.55, abs=0.025)
+
+
 def test_toolbar_uses_three_semantic_action_groups(qt_app):
     window = MainWindow()
 
@@ -2201,16 +2016,12 @@ def test_horizontal_editor_splitter_uses_video_to_form_five_to_four_ratio(qt_app
     window.show()
     qt_app.processEvents()
 
-    if window.main_content_scroll.viewport().width() < 1280:
-        assert window.editor_splitter.orientation() == Qt.Orientation.Vertical
-        return
-
     video_size, form_size = window.editor_splitter.sizes()
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
     assert video_size / form_size == pytest.approx(5 / 4, rel=0.15)
 
 
-def test_editor_splitter_stacks_when_content_viewport_is_below_breakpoint(qt_app):
+def test_editor_splitter_stays_horizontal_in_a_narrow_content_viewport(qt_app):
     window = MainWindow()
     window.resize(1280, 900)
     window.show()
@@ -2222,7 +2033,8 @@ def test_editor_splitter_stacks_when_content_viewport_is_below_breakpoint(qt_app
 
     window._update_editor_splitter_orientation()
 
-    assert window.editor_splitter.orientation() == Qt.Orientation.Vertical
+    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
+    assert window._editor_splitter_stacked is False
 
 
 def test_importing_video_rechecks_right_panel_constraints(
@@ -2371,9 +2183,11 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
         window.redo_button,
         window.clear_button,
     )
-    table_filter_controls = (
+    first_filter_row_controls = (
         window.behavior_filter_combo,
         window.polarity_filter_combo,
+    )
+    second_filter_row_controls = (
         window.status_filter_combo,
         window.sort_combo,
         window.clear_filters_button,
@@ -2386,11 +2200,7 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
 
     assert window.workspace_content.width() <= viewport.width()
     assert window.editor_splitter.width() <= viewport.width()
-    assert window.editor_splitter.orientation() == (
-        Qt.Orientation.Vertical
-        if viewport.width() < 1280
-        else Qt.Orientation.Horizontal
-    )
+    assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
     assert all(
         button.width() >= button.sizeHint().width()
         and annotation_rect.contains(button.geometry())
@@ -2398,8 +2208,17 @@ def test_refined_workspace_does_not_clip_header_or_annotation_actions(
     )
     assert all(
         control.width() >= control.sizeHint().width()
-        and window.table_filter_bar.contentsRect().contains(control.geometry())
-        for control in table_filter_controls
+        and window.table_filter_primary_row.contentsRect().contains(
+            control.geometry()
+        )
+        for control in first_filter_row_controls
+    )
+    assert all(
+        control.width() >= control.sizeHint().width()
+        and window.table_filter_secondary_row.contentsRect().contains(
+            control.geometry()
+        )
+        for control in second_filter_row_controls
     )
     assert all(
         control.width() >= control.sizeHint().width()
@@ -2472,19 +2291,16 @@ def test_video_first_workspace_scrolls_instead_of_compressing_preview(qt_app):
     assert isinstance(window.main_content_scroll, QScrollArea)
     assert window.main_content_scroll.widget() is window.workspace_content
     assert window.main_content_scroll.verticalScrollBar().maximum() > 0
-    assert window.workspace_splitter.indexOf(window.editor_splitter) == 0
+    assert window.editor_splitter.indexOf(window.video_panel) == 0
+    assert window.editor_splitter.indexOf(window.workspace_splitter) == 1
+    assert window.workspace_splitter.indexOf(window.annotation_scroll) == 0
     assert window.workspace_splitter.indexOf(window.task_panel) == 1
     assert window.editor_splitter.minimumHeight() >= 560
     assert window.video_widget.minimumHeight() >= 420
 
-    content = window.workspace_content
-    controls_bottom = window.video_controls_panel.mapTo(
-        content,
-        QPoint(0, window.video_controls_panel.height()),
-    ).y()
-    table_top = window.task_panel.mapTo(content, QPoint(0, 0)).y()
-
-    assert controls_bottom < table_top
+    assert window.video_panel.geometry().right() < (
+        window.workspace_splitter.geometry().left()
+    )
     assert window.task_panel.findChild(QTableWidget) is window.task_table
 
     window.records = [_clip_record("source.mp4", 1)]

@@ -314,38 +314,24 @@ QGroupBox#collapsibleBehaviorGroup::indicator {
     height: 0;
 }
 
-QCheckBox#behaviorTag,
-QCheckBox#customBehaviorTag {
-    min-height: 24px;
-    padding: 5px 10px;
+QComboBox#behaviorTagCombo,
+QComboBox#customTagLibraryCombo {
+    min-height: 32px;
+    padding: 4px 10px;
     background: #e8f3ff;
     border: 1px solid #e5e6eb;
     border-radius: 8px;
     color: #1677ff;
 }
 
-QCheckBox#customBehaviorTag {
-    padding-right: 28px;
-}
-
-QCheckBox#behaviorTag:hover,
-QCheckBox#customBehaviorTag:hover {
+QComboBox#behaviorTagCombo:hover,
+QComboBox#customTagLibraryCombo:hover {
     border-color: #4096ff;
 }
 
-QCheckBox#behaviorTag:checked,
-QCheckBox#customBehaviorTag:checked {
-    background: #1677ff;
-    border-color: #1677ff;
-    color: #ffffff;
-    font-weight: 600;
-}
-
-QCheckBox#behaviorTag::indicator,
-QCheckBox#customBehaviorTag::indicator {
-    width: 0;
-    height: 0;
-    border: 0;
+QComboBox#behaviorTagCombo QAbstractItemView::item {
+    min-height: 30px;
+    padding: 4px 10px;
 }
 
 QLabel#historicalBehaviorTag {
@@ -355,22 +341,6 @@ QLabel#historicalBehaviorTag {
     border: 1px solid #e5e6eb;
     border-radius: 8px;
     color: #86909c;
-}
-
-QToolButton#customTagDeleteButton {
-    min-width: 15px;
-    min-height: 15px;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 8px;
-    color: #1677ff;
-    font-size: 11px;
-}
-
-QToolButton#customTagDeleteButton:hover {
-    background: #ffffff;
-    color: #ff7875;
 }
 
 QScrollBar:vertical {
