@@ -92,6 +92,16 @@ QWidget#workspaceContent {
     border: 0;
 }
 
+QWidget#workspaceContent,
+QWidget#workspaceRow,
+QWidget#annotationWorkspace {
+    background: #f7f8fa;
+}
+
+QWidget#workspaceRow {
+    border: 0;
+}
+
 QScrollArea {
     background: #ffffff;
     border: 1px solid #e5e6eb;
@@ -123,7 +133,7 @@ QGroupBox#taskCard {
     border: 1px solid #e5e6eb;
     border-radius: 8px;
     margin-top: 14px;
-    padding: 14px;
+    padding: 12px;
 }
 
 QGroupBox#toolbarCard::title,
@@ -133,6 +143,10 @@ QGroupBox#taskCard::title {
     color: #1f2329;
     font-size: 14px;
     font-weight: 700;
+}
+
+QGroupBox#toolbarCard {
+    padding: 10px;
 }
 
 QWidget#importCsvActionGroup,

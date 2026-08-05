@@ -67,6 +67,14 @@ def test_light_theme_contains_card_workspace_selectors():
     assert "QCheckBox#customBehaviorTag" not in stylesheet
 
 
+def test_light_theme_styles_fixed_screen_workspace_panels():
+    theme = load_light_fresh_theme()
+
+    assert "QWidget#workspaceRow" in theme
+    assert "QWidget#annotationWorkspace" in theme
+    assert "QGroupBox#taskCard" in theme
+
+
 def test_light_theme_contains_ant_desktop_tokens_and_eight_pixel_radius():
     stylesheet = load_light_fresh_theme()
 
