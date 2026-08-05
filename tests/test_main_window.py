@@ -2064,6 +2064,104 @@ def test_main_window_uses_resizable_workspace_splitters(qt_app):
     assert window.editor_splitter.orientation() == Qt.Orientation.Horizontal
 
 
+def test_toolbar_uses_three_semantic_action_groups(qt_app):
+    window = MainWindow()
+
+    assert window.import_csv_action_group.objectName() == "importCsvActionGroup"
+    assert window.export_output_action_group.objectName() == "exportOutputActionGroup"
+    assert (
+        window.settings_operation_action_group.objectName()
+        == "settingsOperationActionGroup"
+    )
+    assert not window.advanced_export_group.isChecked()
+
+
+def test_annotation_time_and_action_controls_share_horizontal_rows(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    time_y = {
+        control.mapTo(window.annotation_panel, QPoint(0, 0)).y()
+        for control in (window.start_spin, window.end_spin, window.sequence_spin)
+    }
+    action_y = {
+        control.mapTo(window.annotation_panel, QPoint(0, 0)).y()
+        for control in (
+            window.add_button,
+            window.remove_button,
+            window.undo_button,
+            window.redo_button,
+            window.clear_button,
+        )
+    }
+
+    assert len(time_y) == 1
+    assert len(action_y) == 1
+
+
+def test_lighting_and_polarity_use_independent_collapsible_groups(qt_app):
+    window = MainWindow()
+
+    assert isinstance(window.lighting_group, QGroupBox)
+    assert isinstance(window.polarity_group, QGroupBox)
+    assert window.lighting_group.isCheckable()
+    assert window.polarity_group.isCheckable()
+    assert window.lighting_group.isChecked()
+    assert window.polarity_group.isChecked()
+
+
+def test_output_path_is_elided_with_a_full_path_tooltip(qt_app):
+    window = MainWindow()
+    window.resize(1120, 720)
+    window.show()
+    qt_app.processEvents()
+    window.output_dir = Path(
+        "C:/very-long-output-directory/with-many-subdirectories/"
+        "and-a-dataset-name-that-must-not-overflow-the-toolbar"
+    )
+
+    window._set_output_folder_display()
+
+    assert window.output_folder_label.toolTip() == str(window.output_dir)
+    assert "…" in window.output_folder_label.text()
+
+
+def test_selecting_output_folder_refreshes_elided_path_display(
+    qt_app, monkeypatch
+):
+    selected = (
+        "C:/very-long-output-directory/with-many-subdirectories/"
+        "and-a-dataset-name-that-must-not-overflow-the-toolbar"
+    )
+    window = MainWindow()
+    window.resize(1120, 720)
+    window.show()
+    qt_app.processEvents()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getExistingDirectory",
+        staticmethod(lambda *_args, **_kwargs: selected),
+    )
+
+    window.select_output_folder()
+
+    assert window.output_folder_label.toolTip() == str(Path(selected))
+    assert "…" in window.output_folder_label.text()
+
+
+def test_horizontal_editor_splitter_uses_video_to_form_five_to_four_ratio(qt_app):
+    window = MainWindow()
+    window.resize(1920, 900)
+    window.show()
+    qt_app.processEvents()
+
+    video_size, form_size = window.editor_splitter.sizes()
+
+    assert video_size / form_size == pytest.approx(5 / 4, rel=0.15)
+
+
 def test_card_workspace_uses_semantic_cards_without_overlapping_video_controls(
     qt_app,
 ):
@@ -2087,10 +2185,15 @@ def test_refined_visual_sections_keep_existing_controls_semantic(qt_app):
     window.show()
     qt_app.processEvents()
 
-    assert window.import_action_group.objectName() == "importActionGroup"
-    assert window.csv_action_group.objectName() == "csvActionGroup"
-    assert window.export_action_group.objectName() == "exportActionGroup"
-    assert window.settings_action_group.objectName() == "settingsActionGroup"
+    assert window.import_csv_action_group.objectName() == "importCsvActionGroup"
+    assert (
+        window.export_output_action_group.objectName()
+        == "exportOutputActionGroup"
+    )
+    assert (
+        window.settings_operation_action_group.objectName()
+        == "settingsOperationActionGroup"
+    )
     assert window.playback_rate_badge.objectName() == "playbackRateBadge"
     assert window.table_filter_bar.objectName() == "tableFilterBar"
     assert window.table_action_bar.objectName() == "tableActionBar"

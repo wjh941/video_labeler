@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
         self.annotation_scroll.installEventFilter(self)
         self.editor_splitter.addWidget(self.annotation_scroll)
         self._set_annotation_minimum_width()
-        self.editor_splitter.setSizes([616, 788])
+        self.editor_splitter.setSizes([840, 600])
         self.editor_splitter.setMinimumHeight(560)
 
         self.workspace_splitter.addWidget(self.editor_splitter)
@@ -459,7 +459,7 @@ class MainWindow(QMainWindow):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.output_folder_label.setObjectName("mutedLabel")
-        self.output_folder_label.setWordWrap(True)
+        self.output_folder_label.setWordWrap(False)
         self.output_folder_label.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
@@ -508,47 +508,41 @@ class MainWindow(QMainWindow):
             action_group_layout.addLayout(buttons_layout)
             return action_group, buttons_layout
 
-        self.import_action_group, import_actions_layout = create_action_group(
-            "importActionGroup", "导入"
+        self.import_csv_action_group, import_csv_actions_layout = (
+            create_action_group("importCsvActionGroup", "导入与 CSV")
         )
-        import_actions_layout.addWidget(self.open_video_button)
-        action_layout.addWidget(self.import_action_group)
+        import_csv_actions_layout.addWidget(self.open_video_button)
+        import_csv_actions_layout.addWidget(self.import_csv_button)
+        import_csv_actions_layout.addWidget(self.save_csv_button)
+        action_layout.addWidget(self.import_csv_action_group)
 
-        csv_separator = QFrame()
-        csv_separator.setObjectName("toolbarSeparator")
-        csv_separator.setFrameShape(QFrame.Shape.VLine)
-        action_layout.addWidget(csv_separator)
+        separator = QFrame()
+        separator.setObjectName("toolbarSeparator")
+        separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(separator)
 
-        self.csv_action_group, csv_actions_layout = create_action_group(
-            "csvActionGroup", "CSV"
+        self.export_output_action_group, export_output_actions_layout = (
+            create_action_group("exportOutputActionGroup", "导出与输出")
         )
-        csv_actions_layout.addWidget(self.import_csv_button)
-        csv_actions_layout.addWidget(self.save_csv_button)
-        action_layout.addWidget(self.csv_action_group)
+        export_output_actions_layout.addWidget(self.output_folder_button)
+        export_output_actions_layout.addWidget(self.output_folder_label, stretch=1)
+        export_output_actions_layout.addWidget(self.export_button)
+        action_layout.addWidget(self.export_output_action_group, stretch=1)
 
-        export_separator = QFrame()
-        export_separator.setObjectName("toolbarSeparator")
-        export_separator.setFrameShape(QFrame.Shape.VLine)
-        action_layout.addWidget(export_separator)
+        separator = QFrame()
+        separator.setObjectName("toolbarSeparator")
+        separator.setFrameShape(QFrame.Shape.VLine)
+        action_layout.addWidget(separator)
 
-        self.export_action_group, export_actions_layout = create_action_group(
-            "exportActionGroup", "导出"
+        self.settings_operation_action_group, settings_operation_actions_layout = (
+            create_action_group("settingsOperationActionGroup", "设置与操作")
         )
-        export_actions_layout.addWidget(self.output_folder_button)
-        export_actions_layout.addWidget(self.output_folder_label, stretch=1)
-        export_actions_layout.addWidget(self.export_button)
-        action_layout.addWidget(self.export_action_group, stretch=1)
-
-        settings_separator = QFrame()
-        settings_separator.setObjectName("toolbarSeparator")
-        settings_separator.setFrameShape(QFrame.Shape.VLine)
-        action_layout.addWidget(settings_separator)
-
-        self.settings_action_group, settings_actions_layout = (
-            create_action_group("settingsActionGroup", "设置")
-        )
-        settings_actions_layout.addWidget(self.shortcut_help_button)
-        action_layout.addWidget(self.settings_action_group)
+        settings_operation_actions_layout.addWidget(self.shortcut_help_button)
+        action_layout.addWidget(self.settings_operation_action_group)
+        self.import_action_group = self.import_csv_action_group
+        self.csv_action_group = self.import_csv_action_group
+        self.export_action_group = self.export_output_action_group
+        self.settings_action_group = self.settings_operation_action_group
         layout.addLayout(action_layout)
 
         metadata_layout = QHBoxLayout()
@@ -581,7 +575,20 @@ class MainWindow(QMainWindow):
         self.advanced_export_content.setVisible(False)
         self.advanced_export_group.setObjectName("inlineExportOptions")
         layout.addWidget(self.advanced_export_group)
+        self._set_output_folder_display()
         return group
+
+    def _set_output_folder_display(self) -> None:
+        full_text = str(self.output_dir) if self.output_dir else "未选择输出文件夹"
+        self.output_folder_label.setToolTip(full_text)
+        available_width = max(80, self.output_folder_label.width())
+        self.output_folder_label.setText(
+            self.output_folder_label.fontMetrics().elidedText(
+                full_text,
+                Qt.TextElideMode.ElideMiddle,
+                available_width,
+            )
+        )
 
     def _build_project_menu(self) -> None:
         self.project_menu = self.menuBar().addMenu("工程")
@@ -735,20 +742,29 @@ class MainWindow(QMainWindow):
         source_layout.addWidget(self.project_video_combo)
         layout.addLayout(source_layout)
 
-        time_form = QFormLayout()
         self.start_spin = self._new_time_spin()
         self.end_spin = self._new_time_spin()
         self.sequence_spin = QSpinBox()
         self.sequence_spin.setRange(1, 999999)
         self.sequence_spin.setValue(1)
-        time_form.addRow("开始时间", self.start_spin)
-        time_form.addRow("结束时间", self.end_spin)
-        time_form.addRow("编号", self.sequence_spin)
-        layout.addLayout(time_form)
+        time_layout = QHBoxLayout()
+        time_layout.setSpacing(8)
+        for label_text, control in (
+            ("开始时间", self.start_spin),
+            ("结束时间", self.end_spin),
+            ("编号", self.sequence_spin),
+        ):
+            cell = QWidget()
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(4)
+            cell_layout.addWidget(QLabel(label_text))
+            cell_layout.addWidget(control)
+            time_layout.addWidget(cell)
+        layout.addLayout(time_layout)
 
-        actions = QGridLayout()
-        actions.setHorizontalSpacing(8)
-        actions.setVerticalSpacing(8)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
         self.add_button = QPushButton("添加片段")
         self.remove_button = QPushButton("删除所选")
         self.undo_button = QPushButton("撤销")
@@ -758,13 +774,19 @@ class MainWindow(QMainWindow):
         self.remove_button.setObjectName("dangerButton")
         self.undo_button.setObjectName("undoButton")
         self.redo_button.setObjectName("redoButton")
-        actions.addWidget(self.add_button, 0, 0)
-        actions.addWidget(self.remove_button, 0, 1)
-        actions.addWidget(self.undo_button, 0, 2)
-        actions.addWidget(self.redo_button, 1, 0)
-        actions.addWidget(self.clear_button, 1, 1, 1, 2)
-        for column in range(3):
-            actions.setColumnStretch(column, 1)
+        for button in (
+            self.add_button,
+            self.remove_button,
+            self.undo_button,
+            self.redo_button,
+            self.clear_button,
+        ):
+            button.setMinimumHeight(34)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            actions.addWidget(button)
         layout.addLayout(actions)
 
         self.behavior_checks: dict[str, QCheckBox] = {}
@@ -810,7 +832,28 @@ class MainWindow(QMainWindow):
         )
         labels_form.addRow("正负性", self.polarity_combo)
         labels_form.addRow("光照", self.lighting_combo)
-        layout.addLayout(labels_form)
+        while labels_form.count():
+            labels_form.takeAt(0)
+
+        self.lighting_group = CollapsibleGroupBox("光照条件")
+        lighting_content = QWidget()
+        lighting_form = QFormLayout(lighting_content)
+        lighting_form.addRow("光照", self.lighting_combo)
+        lighting_layout = QVBoxLayout(self.lighting_group)
+        lighting_layout.setContentsMargins(6, 6, 6, 6)
+        lighting_layout.addWidget(lighting_content)
+        self.lighting_group.set_content(lighting_content)
+        layout.addWidget(self.lighting_group)
+
+        self.polarity_group = CollapsibleGroupBox("正负例")
+        polarity_content = QWidget()
+        polarity_form = QFormLayout(polarity_content)
+        polarity_form.addRow("正负例", self.polarity_combo)
+        polarity_layout = QVBoxLayout(self.polarity_group)
+        polarity_layout.setContentsMargins(6, 6, 6, 6)
+        polarity_layout.addWidget(polarity_content)
+        self.polarity_group.set_content(polarity_content)
+        layout.addWidget(self.polarity_group)
 
         layout.addWidget(QLabel("生成的文件名"))
         self.filename_preview = QLineEdit()
@@ -999,6 +1042,8 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if hasattr(self, "output_folder_label"):
+            self._set_output_folder_display()
         if hasattr(self, "behavior_checks_layout"):
             self._update_editor_splitter_orientation()
             self._schedule_behavior_reflow()
@@ -1022,7 +1067,7 @@ class MainWindow(QMainWindow):
             else Qt.Orientation.Horizontal
         )
         self.editor_splitter.setSizes(
-            [680, 560] if should_stack else [616, 788]
+            [680, 560] if should_stack else [840, 600]
         )
         self._release_behavior_width_constraints()
 
@@ -1624,6 +1669,7 @@ class MainWindow(QMainWindow):
         self.output_folder_label.setText(
             str(self.output_dir) if self.output_dir else "未选择输出文件夹"
         )
+        self._set_output_folder_display()
 
         entry = self._active_project_video()
         if entry is None:
@@ -1802,7 +1848,7 @@ class MainWindow(QMainWindow):
         if not directory:
             return
         self.output_dir = Path(directory)
-        self.output_folder_label.setText(str(self.output_dir))
+        self._set_output_folder_display()
         self._mark_project_dirty()
         self._set_status(f"输出文件夹：{self.output_dir}")
 
