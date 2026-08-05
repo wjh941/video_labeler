@@ -155,6 +155,7 @@ class CollapsibleGroupBox(QGroupBox):
         self._content = content
         content.setVisible(self.isChecked())
         content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
+        self.chevronRotation = 90.0 if self.isChecked() else 0.0
         self._content_animation = QPropertyAnimation(
             content, b"maximumHeight", self
         )
@@ -852,6 +853,7 @@ class MainWindow(QMainWindow):
         self.behavior_checks: dict[str, QCheckBox] = {}
         self.behaviors_group = CollapsibleGroupBox("行为标签")
         self.behaviors_group.setObjectName("collapsibleBehaviorGroup")
+        self.behaviors_group.setChecked(True)
         self.behavior_checks_container = QWidget()
         behavior_content_layout = QVBoxLayout(self.behavior_checks_container)
         behavior_content_layout.setContentsMargins(0, 0, 0, 0)
@@ -876,6 +878,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.behaviors_group)
 
         self.custom_tags_group = CollapsibleGroupBox("自定义字段")
+        self.custom_tags_group.setChecked(False)
         custom_tags_content = QWidget()
         custom_tags_layout = QVBoxLayout(custom_tags_content)
         custom_tags_layout.setContentsMargins(0, 0, 0, 0)
@@ -929,6 +932,7 @@ class MainWindow(QMainWindow):
             labels_form.takeAt(0)
 
         self.lighting_group = CollapsibleGroupBox("光照条件")
+        self.lighting_group.setChecked(False)
         lighting_content = QWidget()
         lighting_form = QFormLayout(lighting_content)
         lighting_form.addRow("光照", self.lighting_combo)
@@ -939,6 +943,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lighting_group)
 
         self.polarity_group = CollapsibleGroupBox("正负例")
+        self.polarity_group.setChecked(False)
         polarity_content = QWidget()
         polarity_form = QFormLayout(polarity_content)
         polarity_form.addRow("正负例", self.polarity_combo)
@@ -1064,11 +1069,17 @@ class MainWindow(QMainWindow):
             self._resize_video_item()
         return super().eventFilter(watched, event)
 
-    def _build_task_table(self) -> QGroupBox:
-        group = QGroupBox("片段任务")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+    def _build_task_table(self) -> CollapsibleGroupBox:
+        group = CollapsibleGroupBox("片段任务")
+        group.setChecked(True)
+        group.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
         self.task_table = QTableWidget(0, len(TABLE_COLUMNS))
         self.task_table.setHorizontalHeaderLabels(TABLE_COLUMNS)
@@ -1170,6 +1181,10 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.detach_table_button)
         layout.addWidget(self.task_table)
         layout.addWidget(self.table_action_bar)
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(6, 6, 6, 6)
+        group_layout.addWidget(content)
+        group.set_content(content)
         return group
 
     def _show_task_table_dialog(self) -> None:

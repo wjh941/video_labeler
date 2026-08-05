@@ -1631,6 +1631,8 @@ def test_adding_custom_behavior_tag_partially_refreshes_editor_fields(
     assert window.behaviors_group.isChecked() is False
     assert window.polarity_combo.currentText() == "neg"
     assert window.lighting_combo.currentText() == "night_full_color"
+    assert window.lighting_group.isChecked() is False
+    assert window.polarity_group.isChecked() is False
 
 
 def test_custom_field_group_lists_added_tag_for_removal(qt_app):
@@ -1638,6 +1640,7 @@ def test_custom_field_group_lists_added_tag_for_removal(qt_app):
 
     window.custom_behavior_tag_edit.setText("delivery_dropoff")
     window.add_custom_behavior_tag()
+    window.custom_tags_group.setChecked(True)
 
     assert isinstance(window.custom_tags_group, CollapsibleGroupBox)
     assert window.custom_tag_library_combo.currentData() == "delivery_dropoff"
@@ -1994,6 +1997,27 @@ def test_workspace_uses_two_parallel_panels(qt_app):
     assert layout.itemAt(1).widget() is window.annotation_workspace
 
 
+def test_right_side_modules_are_collapsible_groups(qt_app):
+    window = MainWindow()
+
+    assert isinstance(window.behaviors_group, CollapsibleGroupBox)
+    assert isinstance(window.custom_tags_group, CollapsibleGroupBox)
+    assert isinstance(window.lighting_group, CollapsibleGroupBox)
+    assert isinstance(window.polarity_group, CollapsibleGroupBox)
+    assert isinstance(window.task_panel, CollapsibleGroupBox)
+
+
+def test_task_table_receives_remaining_right_pane_height(qt_app):
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.task_panel.isChecked()
+    assert window.task_table.height() > 120
+    assert window.task_table.height() > window.behaviors_group.height()
+
+
 def test_video_panel_receives_about_fifty_two_percent_of_workspace(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
@@ -2062,8 +2086,8 @@ def test_lighting_and_polarity_use_independent_collapsible_groups(qt_app):
     assert isinstance(window.polarity_group, QGroupBox)
     assert window.lighting_group.isCheckable()
     assert window.polarity_group.isCheckable()
-    assert window.lighting_group.isChecked()
-    assert window.polarity_group.isChecked()
+    assert not window.lighting_group.isChecked()
+    assert not window.polarity_group.isChecked()
 
 
 def test_output_path_is_elided_with_a_full_path_tooltip(qt_app):
