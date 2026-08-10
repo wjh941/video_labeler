@@ -1,4 +1,5 @@
 import csv
+import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,40 +99,71 @@ class ExportWorker(QThread):
         self._overwrite = overwrite
         self._workers = workers or 2
         self._control = ExportControl()
+        self._submission_lock = threading.Lock()
 
     def cancel(self) -> None:
-        self._control.cancel()
+        with self._submission_lock:
+            self._control.cancel()
 
     def run(self) -> None:
         self._output_dir.mkdir(parents=True, exist_ok=True)
         total = len(self._records)
         results: list[ExportResult | None] = [None] * total
         completed = 0
+
+        try:
+            validate_batch_source(self._records, self._input_path)
+        except ValueError as error:
+            for index, record in enumerate(self._records):
+                result = ExportResult(
+                    status="fail",
+                    output=record.output,
+                    error=str(error),
+                )
+                results[index] = result
+                record.status = result.status
+                record.error = result.error
+                completed += 1
+                self.clip_finished.emit(index, result)
+                self.progress.emit(completed, total)
+
+            failures = [
+                (index + 1, record, results[index])
+                for index, record in enumerate(self._records)
+                if results[index] is not None
+            ]
+            write_failed_report(self._output_dir / "failed_clips.csv", failures)
+            self.export_completed.emit(
+                ExportSummary.from_results(
+                    result for result in results if result is not None
+                )
+            )
+            return
+
         next_index = 0
         futures = {}
 
         def submit_available(executor: ThreadPoolExecutor) -> None:
             nonlocal next_index
-            while (
-                not self._control.is_canceled()
-                and next_index < total
-                and len(futures) < self._workers
-            ):
-                record = self._records[next_index]
-                request = ExportRequest(
-                    ffmpeg=self._ffmpeg,
-                    ffprobe=self._ffprobe,
-                    input_path=self._input_path,
-                    output_path=self._output_dir / record.output,
-                    start=format_seconds(record.start_seconds),
-                    end=format_seconds(record.end_seconds),
-                    mode=self._mode,
-                    overwrite=self._overwrite,
-                )
-                futures[executor.submit(run_clip_export, request, self._control)] = (
-                    next_index
-                )
-                next_index += 1
+            while next_index < total and len(futures) < self._workers:
+                with self._submission_lock:
+                    if self._control.is_canceled():
+                        return
+                    record = self._records[next_index]
+                    request = ExportRequest(
+                        ffmpeg=self._ffmpeg,
+                        ffprobe=self._ffprobe,
+                        input_path=self._input_path,
+                        output_path=self._output_dir / record.output,
+                        start=format_seconds(record.start_seconds),
+                        end=format_seconds(record.end_seconds),
+                        mode=self._mode,
+                        overwrite=self._overwrite,
+                    )
+                    futures[executor.submit(run_clip_export, request, self._control)] = (
+                        next_index
+                    )
+                    next_index += 1
 
         with ThreadPoolExecutor(max_workers=self._workers) as executor:
             submit_available(executor)

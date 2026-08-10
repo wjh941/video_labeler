@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from ..csv_io import read_clip_csv, write_clip_csv
 from ..export_worker import ExportSummary, ExportWorker
-from ..ffmpeg_service import format_seconds, resolve_ffmpeg
+from ..ffmpeg_service import format_seconds, resolve_ffmpeg, resolve_ffprobe
 from ..models import (
     BEHAVIOR_LABELS,
     LIGHTING_VALUES,
@@ -821,6 +821,7 @@ class MainWindow(QMainWindow):
 
         try:
             ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
+            ffprobe = resolve_ffprobe(ffmpeg)
             self.output_dir.mkdir(parents=True, exist_ok=True)
             if not self.output_dir.is_dir():
                 raise OSError("output path is not a folder")
@@ -838,6 +839,7 @@ class MainWindow(QMainWindow):
             input_path=self.source_path,
             output_dir=self.output_dir,
             ffmpeg=ffmpeg,
+            ffprobe=ffprobe,
             mode=self.mode_combo.currentText(),
             overwrite=self.overwrite_check.isChecked(),
             workers=self.workers_spin.value(),

@@ -9,9 +9,32 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
 
 try:
+    from video_labeler.ui import main_window as main_window_module
+    from video_labeler.models import ClipRecord
     from video_labeler.ui.main_window import MainWindow
 except ImportError:
     MainWindow = None
+
+
+class _FakeSignal:
+    def connect(self, _callback):
+        pass
+
+
+class FakeExportWorker:
+    kwargs = {}
+
+    def __init__(self, **kwargs):
+        type(self).kwargs = kwargs
+        self.clip_finished = _FakeSignal()
+        self.progress = _FakeSignal()
+        self.export_completed = _FakeSignal()
+
+    def isRunning(self):
+        return False
+
+    def start(self):
+        pass
 
 
 @pytest.fixture(scope="module")
@@ -85,3 +108,34 @@ def test_add_clip_action_appears_before_behavior_choices(qt_app):
     ).y()
 
     assert add_clip_y < behaviors_y
+
+
+def test_start_export_passes_resolved_ffprobe(qt_app, tmp_path, monkeypatch):
+    window = MainWindow()
+    source = tmp_path / "cam02.mp4"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "out"
+    window.source_path = source
+    window.output_dir = output_dir
+    window.records = [
+        ClipRecord(
+            source="cam02.mp4",
+            start_seconds=2.5,
+            end_seconds=4.0,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+        )
+    ]
+    FakeExportWorker.kwargs = {}
+
+    monkeypatch.setattr(main_window_module, "resolve_ffmpeg", lambda _path: "ffmpeg.exe")
+    monkeypatch.setattr(
+        main_window_module,
+        "resolve_ffprobe",
+        lambda _ffmpeg: "ffprobe.exe",
+        raising=False,
+    )
+    monkeypatch.setattr(main_window_module, "ExportWorker", FakeExportWorker)
+
+    window.start_export()
+
+    assert FakeExportWorker.kwargs["ffprobe"] == "ffprobe.exe"

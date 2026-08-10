@@ -152,3 +152,68 @@ def test_worker_marks_unsubmitted_records_canceled_after_cancellation(
 
     assert [result.status for result in results] == ["canceled"] * 3
     assert [record.status for record in records] == ["canceled"] * 3
+
+
+def test_worker_rejects_mismatched_sources_without_submitting_exports(
+    tmp_path, monkeypatch
+):
+    records = [_record(), replace(_record(), source="cam03.mp4")]
+    worker = _worker(tmp_path, records=records)
+    submitted = []
+    results = []
+    progress = []
+    summaries = []
+
+    monkeypatch.setattr(
+        export_worker,
+        "run_clip_export",
+        lambda *args: (
+            submitted.append(args),
+            ExportResult("ok", output=args[0].output_path.name),
+        )[1],
+    )
+    worker.clip_finished.connect(lambda _, result: results.append(result))
+    worker.progress.connect(lambda completed, total: progress.append((completed, total)))
+    worker.export_completed.connect(summaries.append)
+
+    worker.run()
+
+    assert submitted == []
+    assert [result.status for result in results] == ["fail", "fail"]
+    assert {result.error for result in results} == {
+        "All clips must use the selected source video; mismatched rows: cam03.mp4"
+    }
+    assert progress == [(1, 2), (2, 2)]
+    assert (summaries[0].success, summaries[0].failed) == (0, 2)
+    assert "cam03.mp4" in (tmp_path / "out" / "failed_clips.csv").read_text(
+        encoding="utf-8-sig"
+    )
+
+
+def test_worker_does_not_submit_after_cancellation_wins_submission_lock(
+    tmp_path, monkeypatch
+):
+    worker = _worker(tmp_path, records=[_record()])
+    submitted = []
+
+    class CancellationWinningLock:
+        def __enter__(self):
+            worker._control.cancel()
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    monkeypatch.setattr(
+        export_worker,
+        "run_clip_export",
+        lambda *args: (
+            submitted.append(args),
+            ExportResult("ok", output=args[0].output_path.name),
+        )[1],
+    )
+    worker._submission_lock = CancellationWinningLock()
+
+    worker.run()
+
+    assert submitted == []
