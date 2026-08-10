@@ -243,6 +243,7 @@ def _communicate_until_finished(
         try:
             stdout, stderr = process.communicate(timeout=0.1)
             if control is not None and control.is_canceled():
+                _stop_process(process)
                 return stdout, stderr, True
             return stdout, stderr, False
         except subprocess.TimeoutExpired:
@@ -254,6 +255,7 @@ def run_clip_export(
 ) -> ExportResult:
     output_name = request.output_path.name
     temporary_path = temporary_output_path(request.output_path)
+    owns_temporary_path = False
     try:
         if control is not None and control.is_canceled():
             return ExportResult(status="canceled", output=output_name)
@@ -269,7 +271,10 @@ def run_clip_export(
             raise FileNotFoundError(f"source video not found: {request.input_path}")
 
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path.unlink(missing_ok=True)
+        if temporary_path.exists():
+            raise FileExistsError(
+                f"temporary output already exists: {temporary_path}"
+            )
         command = build_command(
             request.ffmpeg,
             request.input_path,
@@ -285,6 +290,7 @@ def run_clip_export(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        owns_temporary_path = True
         if control is not None:
             control.register(process)
         try:
@@ -294,6 +300,9 @@ def run_clip_export(
                 control.unregister(process)
 
         if canceled:
+            return ExportResult(status="canceled", output=output_name)
+        if control is not None and control.is_canceled():
+            _stop_process(process)
             return ExportResult(status="canceled", output=output_name)
         if process.returncode != 0:
             raise RuntimeError(stderr.strip() or stdout.strip())
@@ -306,9 +315,12 @@ def run_clip_export(
             request.start
         )
         validate_output_media(request.ffprobe, temporary_path, expected_duration)
+        if control is not None and control.is_canceled():
+            return ExportResult(status="canceled", output=output_name)
         temporary_path.replace(request.output_path)
         return ExportResult(status="ok", output=output_name)
     except Exception as error:
         return ExportResult(status="fail", output=output_name, error=str(error))
     finally:
-        temporary_path.unlink(missing_ok=True)
+        if owns_temporary_path:
+            temporary_path.unlink(missing_ok=True)

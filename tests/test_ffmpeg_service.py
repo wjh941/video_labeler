@@ -101,7 +101,9 @@ def test_encode_command_rejects_an_end_time_before_start_time(tmp_path):
 def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
     assert ExportRequest is not None, "clip export execution API is not implemented"
     output_path = tmp_path / "already-cut.mp4"
+    temporary_path = tmp_path / "already-cut.part.mp4"
     output_path.write_bytes(b"x" * 1024)
+    temporary_path.write_bytes(b"owned by another export")
     request = ExportRequest(
         ffmpeg="ffmpeg.exe",
         ffprobe="ffprobe.exe",
@@ -117,6 +119,32 @@ def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
 
     assert result.status == "skip"
     assert result.output == output_path.name
+    assert temporary_path.read_bytes() == b"owned by another export"
+
+
+def test_run_clip_export_leaves_unowned_temporary_output_after_prelaunch_failure(
+    tmp_path,
+):
+    assert ExportRequest is not None, "clip export execution API is not implemented"
+    output_path = tmp_path / "missing-source.mp4"
+    temporary_path = tmp_path / "missing-source.part.mp4"
+    temporary_path.write_bytes(b"owned by another export")
+
+    result = run_clip_export(
+        ExportRequest(
+            ffmpeg="ffmpeg.exe",
+            ffprobe="ffprobe.exe",
+            input_path=tmp_path / "missing.mp4",
+            output_path=output_path,
+            start="00:00:02.000",
+            end="00:00:04.000",
+            mode="encode",
+            overwrite=False,
+        )
+    )
+
+    assert result.status == "fail"
+    assert temporary_path.read_bytes() == b"owned by another export"
 
 
 def test_resolve_ffprobe_uses_sibling_of_configured_ffmpeg(tmp_path):
@@ -251,6 +279,71 @@ def test_run_clip_export_publishes_valid_temporary_output(tmp_path, monkeypatch)
     assert not temporary.exists()
 
 
+def test_run_clip_export_does_not_publish_when_canceled_during_validation(
+    tmp_path, monkeypatch
+):
+    assert ExportControl is not None, "export process control API is not implemented"
+    assert run_clip_export is not None, "clip export execution API is not implemented"
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "clip.mp4"
+    temporary = tmp_path / "clip.part.mp4"
+    validation_started = threading.Event()
+    allow_validation_to_finish = threading.Event()
+
+    class SuccessfulPopen:
+        def __init__(self, command, **kwargs):
+            self.command = command
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            temporary.write_bytes(b"x" * 2048)
+            self.returncode = 0
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    def run_ffprobe(*args, **kwargs):
+        validation_started.set()
+        assert allow_validation_to_finish.wait(timeout=1)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            '{"format":{"duration":"2.0"},"streams":[{"codec_type":"video"}]}',
+            "",
+        )
+
+    monkeypatch.setattr(subprocess, "Popen", SuccessfulPopen)
+    monkeypatch.setattr(subprocess, "run", run_ffprobe)
+    control = ExportControl()
+    request = ExportRequest(
+        ffmpeg="ffmpeg.exe",
+        ffprobe="ffprobe.exe",
+        input_path=source,
+        output_path=output,
+        start="00:00:02.000",
+        end="00:00:04.000",
+        mode="encode",
+        overwrite=False,
+    )
+    result = []
+    thread = threading.Thread(
+        target=lambda: result.append(run_clip_export(request, control))
+    )
+
+    thread.start()
+    assert validation_started.wait(timeout=1)
+    control.cancel()
+    allow_validation_to_finish.set()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert result[0].status == "canceled"
+    assert not output.exists()
+    assert not temporary.exists()
+
+
 @pytest.mark.parametrize("ffmpeg_returncode, has_video", [(1, True), (0, False)])
 def test_run_clip_export_removes_temporary_output_after_failure(
     tmp_path, monkeypatch, ffmpeg_returncode, has_video
@@ -318,13 +411,11 @@ def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
             self.command = command
             self.returncode = None
             self.terminated = False
+            self.killed = False
 
         def communicate(self, timeout=None):
             temporary.write_bytes(b"x" * 2048)
             started.set()
-            if self.terminated:
-                self.returncode = -15
-                return "", ""
             raise subprocess.TimeoutExpired(self.command, timeout)
 
         def poll(self):
@@ -334,13 +425,23 @@ def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
             self.terminated = True
 
         def wait(self, timeout=None):
-            self.returncode = -15
+            if not self.killed:
+                raise subprocess.TimeoutExpired(self.command, timeout)
+            self.returncode = -9
             return self.returncode
 
         def kill(self):
+            self.killed = True
             self.returncode = -9
 
-    monkeypatch.setattr(subprocess, "Popen", HangingPopen)
+    processes = []
+
+    def start_process(*args, **kwargs):
+        process = HangingPopen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", start_process)
     control = ExportControl()
     request = ExportRequest(
         ffmpeg="ffmpeg.exe",
@@ -366,3 +467,4 @@ def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
     assert result[0].status == "canceled"
     assert not output.exists()
     assert not temporary.exists()
+    assert processes[0].killed
