@@ -105,7 +105,7 @@ def _is_number(value: Any) -> bool:
 def write_project_manifest(path: Path, state: ProjectState) -> None:
     payload = {
         "version": PROJECT_MANIFEST_VERSION,
-        "source_path": str(state.source_path) if state.source_path else None,
+        "source_path": str(state.source_path.resolve()) if state.source_path else None,
         "output_dir": str(state.output_dir) if state.output_dir else None,
         "metadata": {
             "date": state.metadata.date,
@@ -118,7 +118,11 @@ def write_project_manifest(path: Path, state: ProjectState) -> None:
 
 
 def read_project_manifest(path: Path) -> ProjectState:
-    payload = _require_mapping(json.loads(path.read_text(encoding="utf-8")), "manifest")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"unable to read project manifest {path}: {error}") from error
+    payload = _require_mapping(payload, "manifest")
     if payload.get("version") != PROJECT_MANIFEST_VERSION:
         raise ValueError(f"unsupported manifest version: {payload.get('version')}")
 
@@ -139,16 +143,17 @@ def read_project_manifest(path: Path) -> ProjectState:
         raise ValueError("records must be a list")
 
     return ProjectState(
-        source_path=_path_or_none(payload.get("source_path"), "source_path"),
+        source_path=_path_or_none(payload.get("source_path"), "source_path", absolute=True),
         output_dir=_path_or_none(payload.get("output_dir"), "output_dir"),
         metadata=metadata,
         records=[_record_from_payload(record, index) for index, record in enumerate(records_payload, start=1)],
     )
 
 
-def _path_or_none(value: Any, name: str) -> Path | None:
+def _path_or_none(value: Any, name: str, *, absolute: bool = False) -> Path | None:
     if value is None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string or null")
-    return Path(value)
+    result = Path(value)
+    return result.resolve() if absolute else result

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import pytest
 
@@ -101,4 +102,36 @@ def test_read_project_manifest_rejects_partial_labels(tmp_path):
     )
 
     with pytest.raises(ValueError, match="record 1.*labels"):
+        read_project_manifest(path)
+
+
+def test_project_manifest_normalizes_relative_source_path(tmp_path):
+    state = ProjectState(
+        source_path=Path("videos/cam02.mp4"),
+        output_dir=None,
+        metadata=ProjectMetadata("20260729", "cam02", "panorama"),
+        records=[],
+    )
+    path = tmp_path / "project.json"
+
+    write_project_manifest(path, state)
+
+    loaded = read_project_manifest(path)
+    assert loaded.source_path == state.source_path.resolve()
+    assert loaded.source_path.is_absolute()
+
+
+def test_read_project_manifest_wraps_invalid_json_with_manifest_path(tmp_path):
+    path = tmp_path / "invalid.json"
+    path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=re.escape(str(path))):
+        read_project_manifest(path)
+
+
+def test_read_project_manifest_wraps_decode_failure_with_manifest_path(tmp_path):
+    path = tmp_path / "invalid-encoding.json"
+    path.write_bytes(b"\xff")
+
+    with pytest.raises(ValueError, match=re.escape(str(path))):
         read_project_manifest(path)
