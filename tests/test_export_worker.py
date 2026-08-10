@@ -1,16 +1,43 @@
+from dataclasses import replace
+
+import pytest
+
 try:
-    from video_labeler.export_worker import ExportSummary, write_failed_report
+    from video_labeler import export_worker
+    from video_labeler.export_worker import (
+        ExportSummary,
+        ExportWorker,
+        validate_batch_source,
+        write_failed_report,
+    )
     from video_labeler.ffmpeg_service import ExportResult
     from video_labeler.models import ClipRecord
 except ImportError:
     ClipRecord = None
     ExportResult = None
     ExportSummary = None
+    ExportWorker = None
+    export_worker = None
+    validate_batch_source = None
     write_failed_report = None
 
 
 def _require_export_api():
     assert ExportSummary is not None, "background export API is not implemented"
+
+
+def _worker(tmp_path, records, workers=0):
+    assert ExportWorker is not None, "background export worker API is not implemented"
+    return ExportWorker(
+        records=records,
+        input_path=tmp_path / "cam02.mp4",
+        output_dir=tmp_path / "out",
+        ffmpeg="ffmpeg.exe",
+        ffprobe="ffprobe.exe",
+        mode="encode",
+        overwrite=False,
+        workers=workers,
+    )
 
 
 def _record() -> object:
@@ -63,3 +90,65 @@ def test_write_failed_report_preserves_batch_debugging_fields(tmp_path):
             "source video not found"
         ),
     ]
+
+
+def test_automatic_worker_count_is_two(tmp_path):
+    worker = _worker(tmp_path, records=[])
+
+    assert worker._workers == 2
+
+
+def test_validate_batch_source_rejects_rows_from_another_video(tmp_path):
+    assert validate_batch_source is not None, "batch source validation is not implemented"
+    records = [_record(), replace(_record(), source="cam03.mp4")]
+
+    with pytest.raises(ValueError, match="cam03.mp4"):
+        validate_batch_source(records, tmp_path / "cam02.mp4")
+
+
+def test_worker_passes_ffprobe_and_one_shared_control_to_each_export(
+    tmp_path, monkeypatch
+):
+    worker = _worker(tmp_path, records=[_record(), _record()], workers=2)
+    submitted = []
+
+    def export(request, control):
+        submitted.append((request, control))
+        return ExportResult("ok", output=request.output_path.name)
+
+    monkeypatch.setattr(export_worker, "run_clip_export", export)
+
+    worker.run()
+
+    assert [request.ffprobe for request, _ in submitted] == ["ffprobe.exe"] * 2
+    assert {id(control) for _, control in submitted} == {id(worker._control)}
+
+
+def test_worker_cancel_delegates_to_shared_control(tmp_path, monkeypatch):
+    worker = _worker(tmp_path, records=[])
+    canceled = []
+    monkeypatch.setattr(worker._control, "cancel", lambda: canceled.append(True))
+
+    worker.cancel()
+
+    assert canceled == [True]
+
+
+def test_worker_marks_unsubmitted_records_canceled_after_cancellation(
+    tmp_path, monkeypatch
+):
+    records = [_record(), _record(), _record()]
+    worker = _worker(tmp_path, records=records, workers=2)
+    results = []
+
+    def export(request, control):
+        worker.cancel()
+        return ExportResult("canceled", output=request.output_path.name)
+
+    monkeypatch.setattr(export_worker, "run_clip_export", export)
+    worker.clip_finished.connect(lambda _, result: results.append(result))
+
+    worker.run()
+
+    assert [result.status for result in results] == ["canceled"] * 3
+    assert [record.status for record in records] == ["canceled"] * 3
