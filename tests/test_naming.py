@@ -10,6 +10,11 @@ except ImportError:
     parse_filename = None
 
 try:
+    from video_labeler.naming import validate_labels
+except ImportError:
+    validate_labels = None
+
+try:
     from video_labeler.naming import validate_output_filename
 except ImportError:
     validate_output_filename = None
@@ -70,3 +75,10 @@ def test_validate_output_filename_rejects_windows_path_characters():
 
     with pytest.raises(ValueError, match="invalid Windows"):
         validate_output_filename("20260729-cam02_panorama-dog/out.mp4")
+
+
+def test_validate_labels_rejects_empty_behavior_list():
+    assert validate_labels is not None, "label validation API is not implemented"
+
+    with pytest.raises(ValueError, match="at least one"):
+        validate_labels((), "pos", "daytime", 1)

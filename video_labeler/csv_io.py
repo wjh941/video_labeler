@@ -3,10 +3,22 @@ from pathlib import Path
 from typing import Sequence
 
 from .models import ClipRecord
-from .naming import parse_filename
+from .naming import parse_filename, validate_labels
 
 
-CSV_FIELDS = ("source", "start", "end", "output")
+CSV_FIELDS = (
+    "source",
+    "start",
+    "end",
+    "output",
+    "behaviors",
+    "polarity",
+    "lighting",
+    "sequence",
+    "status",
+    "error",
+)
+LEGACY_CSV_FIELDS = ("source", "start", "end", "output")
 
 
 def _parse_seconds(value: str) -> float:
@@ -46,15 +58,42 @@ def write_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                     "start": _format_seconds(record.start_seconds),
                     "end": _format_seconds(record.end_seconds),
                     "output": record.output,
+                    "behaviors": "+".join(record.behaviors),
+                    "polarity": record.polarity,
+                    "lighting": record.lighting,
+                    "sequence": record.sequence,
+                    "status": record.status,
+                    "error": record.error,
                 }
             )
+
+
+def _labels_from_row(
+    row: dict[str, str | None], index: int, output: str
+) -> tuple[tuple[str, ...], str, str, int]:
+    explicit = tuple(
+        (row.get(name) or "").strip()
+        for name in ("behaviors", "polarity", "lighting", "sequence")
+    )
+    if any(explicit):
+        if not all(explicit):
+            raise ValueError(f"CSV row {index} has incomplete label values")
+        behaviors = tuple(explicit[0].split("+"))
+        sequence = int(explicit[3])
+        validate_labels(behaviors, explicit[1], explicit[2], sequence)
+        return behaviors, explicit[1], explicit[2], sequence
+
+    parsed = parse_filename(output)
+    if parsed is None:
+        return (), "", "", 0
+    return parsed.behaviors, parsed.polarity, parsed.lighting, parsed.sequence
 
 
 def read_clip_csv(path: Path) -> list[ClipRecord]:
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         fieldnames = set(reader.fieldnames or ())
-        missing = set(CSV_FIELDS) - fieldnames
+        missing = set(LEGACY_CSV_FIELDS) - fieldnames
         if missing:
             raise ValueError(f"CSV missing columns: {', '.join(sorted(missing))}")
 
@@ -75,17 +114,21 @@ def read_clip_csv(path: Path) -> list[ClipRecord]:
             if end_seconds <= start_seconds:
                 raise ValueError(f"CSV row {index} ends before it starts")
 
-            parsed = parse_filename(output)
+            behaviors, polarity, lighting, sequence = _labels_from_row(
+                row, index, output
+            )
             records.append(
                 ClipRecord(
                     source=source,
                     start_seconds=start_seconds,
                     end_seconds=end_seconds,
                     output=output,
-                    behaviors=parsed.behaviors if parsed else (),
-                    polarity=parsed.polarity if parsed else "",
-                    lighting=parsed.lighting if parsed else "",
-                    sequence=parsed.sequence if parsed else 0,
+                    behaviors=behaviors,
+                    polarity=polarity,
+                    lighting=lighting,
+                    sequence=sequence,
+                    status=(row.get("status") or "queued").strip() or "queued",
+                    error=(row.get("error") or "").strip(),
                 )
             )
 

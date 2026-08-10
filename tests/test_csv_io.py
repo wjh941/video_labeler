@@ -36,12 +36,34 @@ def test_write_clip_csv_uses_batch_script_headers_and_bom(tmp_path):
     raw = csv_path.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     assert raw.decode("utf-8-sig").splitlines() == [
-        "source,start,end,output",
+        "source,start,end,output,behaviors,polarity,lighting,sequence,status,error",
         (
             "cam02_20260729.mp4,00:00:02.500,00:00:04.000,"
-            "20260729-cam02_panorama-dog_out-pos-daytime-001.mp4"
+            "20260729-cam02_panorama-dog_out-pos-daytime-001.mp4,dog_out,pos,"
+            "daytime,1,queued,"
         ),
     ]
+
+
+def test_extended_csv_round_trip_preserves_custom_output_and_labels(tmp_path):
+    _require_csv_api()
+    record = ClipRecord(
+        source="cam02.mp4",
+        start_seconds=2.5,
+        end_seconds=4.0,
+        output="manual-review-01.mp4",
+        behaviors=("dog_out",),
+        polarity="pos",
+        lighting="daytime",
+        sequence=7,
+        status="fail",
+        error="source missing",
+    )
+    path = tmp_path / "clips.csv"
+
+    write_clip_csv(path, [record])
+
+    assert read_clip_csv(path) == [record]
 
 
 def test_read_clip_csv_restores_times_and_standard_filename_labels(tmp_path):
@@ -65,6 +87,28 @@ def test_read_clip_csv_restores_times_and_standard_filename_labels(tmp_path):
     assert record.polarity == "neg"
     assert record.lighting == "daytime"
     assert record.sequence == 21
+
+
+def test_read_clip_csv_accepts_legacy_four_column_rows_with_queued_status(tmp_path):
+    _require_csv_api()
+    csv_path = tmp_path / "legacy.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            "cam02.mp4,00:00:02.500,00:00:04.000,"
+            "20260729-cam02_closeup-dog_out-neg-daytime-021.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+
+    record = read_clip_csv(csv_path)[0]
+
+    assert record.behaviors == ("dog_out",)
+    assert record.polarity == "neg"
+    assert record.lighting == "daytime"
+    assert record.sequence == 21
+    assert record.status == "queued"
+    assert record.error == ""
 
 
 def test_read_clip_csv_rejects_missing_required_headers(tmp_path):

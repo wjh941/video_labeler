@@ -56,6 +56,12 @@ def _validate_labels(
         raise ValueError("sequence must be at least 1")
 
 
+def validate_labels(
+    behaviors: tuple[str, ...], polarity: str, lighting: str, sequence: int
+) -> None:
+    _validate_labels(behaviors, polarity, lighting, sequence)
+
+
 def build_filename(
     metadata: ProjectMetadata,
     behaviors: tuple[str, ...],
