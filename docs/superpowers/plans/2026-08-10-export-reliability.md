@@ -428,13 +428,16 @@ git commit -m "feat: validate media before publishing exports"
 
 **Files:**
 - Modify: `video_labeler/export_worker.py:1-151`
+- Modify: `video_labeler/ui/main_window.py`
 - Modify: `tests/test_export_worker.py`
+- Modify: `tests/test_main_window.py`
 
 **Interfaces:**
 - Produces `validate_batch_source(records: Sequence[ClipRecord],
   input_path: Path) -> None`.
 - `ExportWorker.cancel()` delegates to its `ExportControl`.
 - `ExportWorker(..., workers=0)` uses `self._workers == 2`.
+- `MainWindow.start_export()` resolves ffprobe and passes it to `ExportWorker`.
 
 - [ ] **Step 1: Write failing cancellation, worker default, and source tests**
 
@@ -461,12 +464,40 @@ def test_validate_batch_source_rejects_rows_from_another_video(tmp_path):
         validate_batch_source(records, tmp_path / "cam02.mp4")
 ```
 
+```python
+def test_start_export_passes_resolved_ffprobe(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    source = tmp_path / "cam02.mp4"
+    source.write_bytes(b"source")
+    output_dir = tmp_path / "out"
+    window.source_path = source
+    window.output_dir = output_dir
+    window.records = [_record()]
+
+    monkeypatch.setattr(main_window_module, "resolve_ffmpeg",
+                        lambda _path: "ffmpeg.exe")
+    monkeypatch.setattr(main_window_module, "resolve_ffprobe",
+                        lambda _ffmpeg: "ffprobe.exe")
+    monkeypatch.setattr(main_window_module, "ExportWorker", FakeExportWorker)
+
+    window.start_export()
+
+    assert FakeExportWorker.kwargs["ffprobe"] == "ffprobe.exe"
+```
+
+Define `FakeExportWorker` in `tests/test_main_window.py` with `clip_finished`,
+`progress`, and `export_completed` signal doubles that accept `connect()`, an
+`isRunning()` method returning `False`, and a no-op `start()`. Its constructor
+stores keyword arguments in `FakeExportWorker.kwargs`.
+
 - [ ] **Step 2: Run focused tests and verify failure**
 
 Run:
 
 ```powershell
-& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py -v
+& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py tests/test_main_window.py -v
 ```
 
 Expected: FAIL because `validate_batch_source` does not exist and automatic
@@ -495,12 +526,27 @@ set `self._workers = workers or 2`. `ExportWorker.cancel()` calls the shared
 control, which stops active exports implemented in Task 3. Preserve `canceled`
 results for tasks that were never submitted.
 
+Guard both `ExportWorker.cancel()` and task submission with one
+`threading.Lock`. Under that lock, `cancel()` calls `self._control.cancel()`;
+submission checks `self._control.is_canceled()` and immediately invokes
+`executor.submit(...)`. This makes the cancellation decision and submission
+atomic from the worker's perspective.
+
+At the start of `ExportWorker.run()`, call `validate_batch_source`. If it
+raises `ValueError`, mark every record `fail`, set the shared row error, emit
+each result and progress update, write the normal failed report, emit the
+summary, and return before creating a `ThreadPoolExecutor`.
+
+In `MainWindow.start_export()`, import and call `resolve_ffprobe(ffmpeg)`
+immediately after resolving FFmpeg, then pass `ffprobe=ffprobe` to
+`ExportWorker`.
+
 - [ ] **Step 4: Run focused tests and full regression**
 
 Run:
 
 ```powershell
-& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py -v
+& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py tests/test_main_window.py -v
 & 'D:\Python311\python.exe' -m pytest -q
 ```
 
@@ -510,7 +556,7 @@ default, and all existing tests pass.
 - [ ] **Step 5: Commit export scheduling controls**
 
 ```powershell
-git add video_labeler/export_worker.py tests/test_export_worker.py
+git add video_labeler/export_worker.py video_labeler/ui/main_window.py tests/test_export_worker.py tests/test_main_window.py
 git commit -m "feat: make batch export cancelable and source-safe"
 ```
 
@@ -525,8 +571,8 @@ git commit -m "feat: make batch export cancelable and source-safe"
 - `MainWindow.open_project() -> None` reads a manifest and calls
   `MainWindow.apply_project_state(state: ProjectState) -> None`.
 - `MainWindow.project_state() -> ProjectState` creates the state to persist.
-- `MainWindow.start_export()` resolves both FFmpeg and ffprobe, calls
-  `validate_batch_source`, and passes `ffprobe` into `ExportWorker`.
+- `MainWindow.start_export()` calls `validate_batch_source` before starting
+  its worker; Task 4 already resolves and passes ffprobe.
 
 - [ ] **Step 1: Write failing UI state and action tests**
 
@@ -607,9 +653,9 @@ them to file dialogs that call `read_project_manifest` and
 `QMediaPlayer`; when it does not, retain the path and show an actionable
 status message.
 
-In `start_export`, resolve `ffprobe` immediately after resolving FFmpeg, call
-`validate_batch_source(self.records, self.source_path)`, then pass
-`ffprobe=ffprobe` to the worker.
+In `start_export`, call
+`validate_batch_source(self.records, self.source_path)` before creating the
+worker so mixed-source CSV errors are shown immediately in the UI.
 
 - [ ] **Step 4: Run UI tests and full regression**
 
