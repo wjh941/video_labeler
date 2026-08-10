@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..csv_io import read_clip_csv, write_clip_csv
-from ..export_worker import ExportSummary, ExportWorker
+from ..export_worker import ExportSummary, ExportWorker, validate_batch_source
 from ..ffmpeg_service import format_seconds, resolve_ffmpeg, resolve_ffprobe
 from ..models import (
     BEHAVIOR_LABELS,
@@ -48,6 +48,7 @@ from ..naming import (
     parse_filename,
     validate_output_filename,
 )
+from ..project_io import ProjectState, read_project_manifest, write_project_manifest
 
 
 TABLE_COLUMNS = (
@@ -227,8 +228,10 @@ class MainWindow(QMainWindow):
         layout = QGridLayout(group)
         layout.setHorizontalSpacing(8)
         layout.setVerticalSpacing(6)
-        layout.setColumnStretch(4, 1)
+        layout.setColumnStretch(6, 1)
 
+        self.open_project_button = QPushButton("Open Project")
+        self.save_project_button = QPushButton("Save Project")
         self.open_video_button = QPushButton("Open Video")
         self.import_csv_button = QPushButton("Import CSV")
         self.save_csv_button = QPushButton("Save Annotation CSV")
@@ -258,12 +261,14 @@ class MainWindow(QMainWindow):
         self.workers_spin.setValue(0)
         self.workers_spin.setSpecialValueText("Auto")
 
-        layout.addWidget(self.open_video_button, 0, 0)
-        layout.addWidget(self.import_csv_button, 0, 1)
-        layout.addWidget(self.save_csv_button, 0, 2)
-        layout.addWidget(self.output_folder_button, 0, 3)
-        layout.addWidget(self.output_folder_label, 0, 4)
-        layout.addWidget(self.export_button, 0, 5)
+        layout.addWidget(self.open_project_button, 0, 0)
+        layout.addWidget(self.save_project_button, 0, 1)
+        layout.addWidget(self.open_video_button, 0, 2)
+        layout.addWidget(self.import_csv_button, 0, 3)
+        layout.addWidget(self.save_csv_button, 0, 4)
+        layout.addWidget(self.output_folder_button, 0, 5)
+        layout.addWidget(self.output_folder_label, 0, 6)
+        layout.addWidget(self.export_button, 0, 7)
 
         layout.addWidget(QLabel("Date"), 1, 0)
         layout.addWidget(self.date_edit, 1, 1)
@@ -289,7 +294,7 @@ class MainWindow(QMainWindow):
         options_layout.addWidget(self.workers_spin)
         advanced_layout.addWidget(self.advanced_export_content)
         self.advanced_export_content.setVisible(False)
-        layout.addWidget(self.advanced_export_group, 2, 0, 1, 6)
+        layout.addWidget(self.advanced_export_group, 2, 0, 1, 8)
         return group
 
     def _build_video_panel(self) -> QGroupBox:
@@ -453,6 +458,8 @@ class MainWindow(QMainWindow):
         return spin
 
     def _connect_signals(self) -> None:
+        self.open_project_button.clicked.connect(self.open_project)
+        self.save_project_button.clicked.connect(self.save_project)
         self.open_video_button.clicked.connect(self.open_video)
         self.import_csv_button.clicked.connect(self.import_csv)
         self.save_csv_button.clicked.connect(self.save_csv)
@@ -513,6 +520,74 @@ class MainWindow(QMainWindow):
         self.set_source_path(path)
         self.player.setSource(QUrl.fromLocalFile(str(path)))
         self.player.pause()
+
+    def project_state(self) -> ProjectState:
+        return ProjectState(
+            source_path=self.source_path,
+            output_dir=self.output_dir,
+            metadata=ProjectMetadata(
+                self.date_edit.text().strip(),
+                self.camera_edit.text().strip(),
+                self.view_combo.currentText(),
+            ),
+            records=list(self.records),
+        )
+
+    def apply_project_state(self, state: ProjectState) -> None:
+        self.source_path = state.source_path
+        self.output_dir = state.output_dir
+        self.records = list(state.records)
+        self.date_edit.setText(state.metadata.date)
+        self.camera_edit.setText(state.metadata.camera)
+        self.view_combo.setCurrentText(state.metadata.view)
+        self.source_name = state.source_path.name if state.source_path else ""
+        self.source_label.setText(self.source_name or "No video selected")
+        self.output_folder_label.setText(
+            str(state.output_dir) if state.output_dir else "No output folder selected"
+        )
+        self._editing_index = None
+        self.add_button.setText("Add Clip")
+        self.sequence_spin.setValue(
+            next_sequence([record.sequence for record in self.records])
+        )
+        self._refresh_table()
+
+        if self.source_path is None:
+            self.player.setSource(QUrl())
+            self._set_status("Project opened without a source video.")
+        elif self.source_path.is_file():
+            self.player.setSource(QUrl.fromLocalFile(str(self.source_path)))
+            self.player.pause()
+            self._set_status(f"Opened project: {self.source_path.name}")
+        else:
+            self.player.setSource(QUrl())
+            self._set_status(
+                f"Source video is unavailable: {self.source_path}. Locate it before playback or export."
+            )
+
+    def open_project(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", "", "Project files (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            self.apply_project_state(read_project_manifest(Path(filename)))
+        except (OSError, ValueError) as error:
+            self._show_error("Could not open project", str(error))
+
+    def save_project(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Project", "project.json", "Project files (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            write_project_manifest(Path(filename), self.project_state())
+        except OSError as error:
+            self._show_error("Could not save project", str(error))
+            return
+        self._set_status(f"Saved project: {filename}")
 
     def import_csv(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -820,6 +895,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            validate_batch_source(self.records, self.source_path)
             ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
             ffprobe = resolve_ffprobe(ffmpeg)
             self.output_dir.mkdir(parents=True, exist_ok=True)

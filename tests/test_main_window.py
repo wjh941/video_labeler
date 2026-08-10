@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QApplication, QScrollArea, QSlider, QSplitter
 
 try:
     from video_labeler.ui import main_window as main_window_module
-    from video_labeler.models import ClipRecord
+    from video_labeler.models import ClipRecord, ProjectMetadata
+    from video_labeler.project_io import ProjectState
     from video_labeler.ui.main_window import MainWindow
 except ImportError:
     MainWindow = None
@@ -139,3 +140,72 @@ def test_start_export_passes_resolved_ffprobe(qt_app, tmp_path, monkeypatch):
     window.start_export()
 
     assert FakeExportWorker.kwargs["ffprobe"] == "ffprobe.exe"
+
+
+def test_project_actions_are_available(qt_app):
+    window = MainWindow()
+
+    assert window.open_project_button.text() == "Open Project"
+    assert window.save_project_button.text() == "Save Project"
+
+
+def test_apply_project_state_restores_annotation_data(qt_app, tmp_path):
+    window = MainWindow()
+    state = ProjectState(
+        source_path=tmp_path / "cam02.mp4",
+        output_dir=tmp_path / "out",
+        metadata=ProjectMetadata("20260729", "cam02", "panorama"),
+        records=[
+            ClipRecord(
+                source="cam02.mp4",
+                start_seconds=2.5,
+                end_seconds=4.0,
+                output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+            )
+        ],
+    )
+
+    window.apply_project_state(state)
+
+    assert window.source_path == state.source_path
+    assert window.output_dir == state.output_dir
+    assert window.records == state.records
+    assert window.date_edit.text() == "20260729"
+    assert window.camera_edit.text() == "cam02"
+    assert window.view_combo.currentText() == "panorama"
+    assert window.source_label.text() == "cam02.mp4"
+    assert window.output_folder_label.text() == str(tmp_path / "out")
+    assert window.task_table.rowCount() == 1
+
+
+def test_start_export_rejects_mismatched_sources_before_creating_worker(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    source = tmp_path / "cam02.mp4"
+    source.write_bytes(b"source")
+    window.source_path = source
+    window.output_dir = tmp_path / "out"
+    window.records = [
+        ClipRecord(
+            source="cam03.mp4",
+            start_seconds=2.5,
+            end_seconds=4.0,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+        )
+    ]
+    errors = []
+    FakeExportWorker.kwargs = {}
+
+    monkeypatch.setattr(window, "_show_error", lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(main_window_module, "ExportWorker", FakeExportWorker)
+
+    window.start_export()
+
+    assert FakeExportWorker.kwargs == {}
+    assert errors == [
+        (
+            "Cannot start export",
+            "All clips must use the selected source video; mismatched rows: cam03.mp4",
+        )
+    ]
