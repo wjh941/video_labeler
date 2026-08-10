@@ -297,9 +297,13 @@ git commit -m "feat: add versioned project manifests"
 - Produces `temporary_output_path(output_path: Path) -> Path`.
 - Produces `validate_output_media(ffprobe: str, path: Path,
   expected_duration: float) -> None`.
+- Produces `ExportControl` with `cancel() -> None`, `is_canceled() -> bool`,
+  `register(process: subprocess.Popen[str]) -> None`, and
+  `unregister(process: subprocess.Popen[str]) -> None`.
 - Changes `run_clip_export(request: ExportRequest,
   control: ExportControl | None = None) -> ExportResult` to publish the final
-  filename only after validation.
+  filename only after validation and to remove temporary output after
+  cancellation.
 
 - [ ] **Step 1: Write failing temporary-output and ffprobe tests**
 
@@ -324,8 +328,8 @@ def test_validate_output_media_rejects_missing_video_stream(tmp_path, monkeypatc
 ```
 
 Add tests for a valid video stream/duration, duration outside the tolerance,
-and FFmpeg success that writes the temporary file then atomically creates the
-final file.
+FFmpeg success that writes the temporary file then atomically creates the final
+file, and a canceled managed process that removes its `.part.mp4` output.
 
 - [ ] **Step 2: Run focused tests and verify failure**
 
@@ -375,6 +379,27 @@ the temporary output. On successful validation call
 `temporary_path.replace(request.output_path)`. Remove the temporary file on
 FFmpeg failure, validation failure, and cancellation.
 
+```python
+class ExportControl:
+    def __init__(self) -> None:
+        self._canceled = threading.Event()
+        self._processes: set[subprocess.Popen[str]] = set()
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        self._canceled.set()
+        with self._lock:
+            for process in tuple(self._processes):
+                if process.poll() is None:
+                    process.terminate()
+```
+
+Run FFmpeg with `subprocess.Popen`, register the process before waiting, and
+call `communicate(timeout=0.1)` in a loop. If cancellation is requested,
+terminate, wait up to three seconds, then call `kill()` if still running.
+Return `ExportResult(status="canceled")` rather than a failure for an
+interrupted process.
+
 - [ ] **Step 4: Run focused tests and the full suite**
 
 Run:
@@ -396,15 +421,10 @@ git commit -m "feat: validate media before publishing exports"
 ### Task 4: Make Batch Export Cancelable and Source-Safe
 
 **Files:**
-- Modify: `video_labeler/ffmpeg_service.py`
 - Modify: `video_labeler/export_worker.py:1-151`
-- Modify: `tests/test_ffmpeg_service.py`
 - Modify: `tests/test_export_worker.py`
 
 **Interfaces:**
-- Produces `ExportControl` with `cancel() -> None`, `is_canceled() -> bool`,
-  `register(process: subprocess.Popen[str]) -> None`, and
-  `unregister(process: subprocess.Popen[str]) -> None`.
 - Produces `validate_batch_source(records: Sequence[ClipRecord],
   input_path: Path) -> None`.
 - `ExportWorker.cancel()` delegates to its `ExportControl`.
@@ -435,44 +455,18 @@ def test_validate_batch_source_rejects_rows_from_another_video(tmp_path):
         validate_batch_source(records, tmp_path / "cam02.mp4")
 ```
 
-Add a fake `Popen` class whose `communicate(timeout=...)` raises
-`TimeoutExpired` until `terminate()` is called. Verify that
-`ExportControl.cancel()` causes `run_clip_export` to return `status ==
-"canceled"` and removes its `.part.mp4` file.
-
 - [ ] **Step 2: Run focused tests and verify failure**
 
 Run:
 
 ```powershell
-& 'D:\Python311\python.exe' -m pytest tests/test_ffmpeg_service.py tests/test_export_worker.py -v
+& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py -v
 ```
 
-Expected: FAIL because no `ExportControl` or `validate_batch_source` exists
-and automatic workers use the machine CPU count.
+Expected: FAIL because `validate_batch_source` does not exist and automatic
+workers use the machine CPU count.
 
 - [ ] **Step 3: Implement managed process cancellation and source preflight**
-
-```python
-class ExportControl:
-    def __init__(self) -> None:
-        self._canceled = threading.Event()
-        self._processes: set[subprocess.Popen[str]] = set()
-        self._lock = threading.Lock()
-
-    def cancel(self) -> None:
-        self._canceled.set()
-        with self._lock:
-            for process in tuple(self._processes):
-                if process.poll() is None:
-                    process.terminate()
-```
-
-Run FFmpeg with `subprocess.Popen`, register the process before waiting, and
-call `communicate(timeout=0.1)` in a loop. If cancellation is requested,
-terminate, wait up to three seconds, then call `kill()` if still running.
-Return `ExportResult(status="canceled")` rather than a failure for an
-interrupted process.
 
 ```python
 def validate_batch_source(
@@ -491,25 +485,26 @@ def validate_batch_source(
 ```
 
 Instantiate one control per worker, pass it to every submitted export, and
-set `self._workers = workers or 2`. Preserve `canceled` results for tasks
-that were never submitted.
+set `self._workers = workers or 2`. `ExportWorker.cancel()` calls the shared
+control, which stops active exports implemented in Task 3. Preserve `canceled`
+results for tasks that were never submitted.
 
 - [ ] **Step 4: Run focused tests and full regression**
 
 Run:
 
 ```powershell
-& 'D:\Python311\python.exe' -m pytest tests/test_ffmpeg_service.py tests/test_export_worker.py -v
+& 'D:\Python311\python.exe' -m pytest tests/test_export_worker.py -v
 & 'D:\Python311\python.exe' -m pytest -q
 ```
 
-Expected: cancellation cleanup, source validation, concurrency default, and
-all existing tests pass.
+Expected: worker cancellation integration, source validation, concurrency
+default, and all existing tests pass.
 
 - [ ] **Step 5: Commit export scheduling controls**
 
 ```powershell
-git add video_labeler/ffmpeg_service.py video_labeler/export_worker.py tests/test_ffmpeg_service.py tests/test_export_worker.py
+git add video_labeler/export_worker.py tests/test_export_worker.py
 git commit -m "feat: make batch export cancelable and source-safe"
 ```
 
