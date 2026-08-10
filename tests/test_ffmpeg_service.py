@@ -101,9 +101,7 @@ def test_encode_command_rejects_an_end_time_before_start_time(tmp_path):
 def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
     assert ExportRequest is not None, "clip export execution API is not implemented"
     output_path = tmp_path / "already-cut.mp4"
-    temporary_path = tmp_path / "already-cut.part.mp4"
     output_path.write_bytes(b"x" * 1024)
-    temporary_path.write_bytes(b"owned by another export")
     request = ExportRequest(
         ffmpeg="ffmpeg.exe",
         ffprobe="ffprobe.exe",
@@ -119,32 +117,6 @@ def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
 
     assert result.status == "skip"
     assert result.output == output_path.name
-    assert temporary_path.read_bytes() == b"owned by another export"
-
-
-def test_run_clip_export_leaves_unowned_temporary_output_after_prelaunch_failure(
-    tmp_path,
-):
-    assert ExportRequest is not None, "clip export execution API is not implemented"
-    output_path = tmp_path / "missing-source.mp4"
-    temporary_path = tmp_path / "missing-source.part.mp4"
-    temporary_path.write_bytes(b"owned by another export")
-
-    result = run_clip_export(
-        ExportRequest(
-            ffmpeg="ffmpeg.exe",
-            ffprobe="ffprobe.exe",
-            input_path=tmp_path / "missing.mp4",
-            output_path=output_path,
-            start="00:00:02.000",
-            end="00:00:04.000",
-            mode="encode",
-            overwrite=False,
-        )
-    )
-
-    assert result.status == "fail"
-    assert temporary_path.read_bytes() == b"owned by another export"
 
 
 def test_resolve_ffprobe_uses_sibling_of_configured_ffmpeg(tmp_path):
@@ -167,7 +139,35 @@ def test_resolve_ffprobe_uses_path_for_unconfigured_ffmpeg(monkeypatch):
 def test_temporary_output_path_keeps_mp4_extension(tmp_path):
     assert temporary_output_path is not None, "temporary output API is not implemented"
 
-    assert temporary_output_path(tmp_path / "clip.mp4").name == "clip.part.mp4"
+    first = temporary_output_path(tmp_path / "clip.mp4")
+    second = temporary_output_path(tmp_path / "clip.mp4")
+
+    assert first.parent == tmp_path
+    assert first.name.startswith("clip.")
+    assert first.name.endswith(".part.mp4")
+    assert first != second
+
+
+def test_temporary_output_path_is_unique_for_simultaneous_calls(tmp_path):
+    assert temporary_output_path is not None, "temporary output API is not implemented"
+    output_path = tmp_path / "clip.mp4"
+    paths = []
+    barrier = threading.Barrier(2)
+
+    def create_temporary_path():
+        barrier.wait()
+        paths.append(temporary_output_path(output_path))
+
+    first = threading.Thread(target=create_temporary_path)
+    second = threading.Thread(target=create_temporary_path)
+    first.start()
+    second.start()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(set(paths)) == 2
 
 
 def test_validate_output_media_rejects_missing_video_stream(tmp_path, monkeypatch):
@@ -232,17 +232,19 @@ def test_run_clip_export_publishes_valid_temporary_output(tmp_path, monkeypatch)
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
     output = tmp_path / "clip.mp4"
-    temporary = tmp_path / "clip.part.mp4"
 
     class SuccessfulPopen:
         def __init__(self, command, **kwargs):
             self.command = command
+            self.temporary_path = Path(command[-1])
             self.returncode = None
 
         def communicate(self, timeout=None):
-            assert Path(self.command[-1]) == temporary
+            assert self.temporary_path.parent == output.parent
+            assert self.temporary_path.name.startswith("clip.")
+            assert self.temporary_path.name.endswith(".part.mp4")
             assert not output.exists()
-            temporary.write_bytes(b"x" * 2048)
+            self.temporary_path.write_bytes(b"x" * 2048)
             self.returncode = 0
             return "", ""
 
@@ -276,7 +278,7 @@ def test_run_clip_export_publishes_valid_temporary_output(tmp_path, monkeypatch)
 
     assert result.status == "ok"
     assert output.read_bytes() == b"x" * 2048
-    assert not temporary.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
 
 
 def test_run_clip_export_does_not_publish_when_canceled_during_validation(
@@ -287,17 +289,17 @@ def test_run_clip_export_does_not_publish_when_canceled_during_validation(
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
     output = tmp_path / "clip.mp4"
-    temporary = tmp_path / "clip.part.mp4"
     validation_started = threading.Event()
     allow_validation_to_finish = threading.Event()
 
     class SuccessfulPopen:
         def __init__(self, command, **kwargs):
             self.command = command
+            self.temporary_path = Path(command[-1])
             self.returncode = None
 
         def communicate(self, timeout=None):
-            temporary.write_bytes(b"x" * 2048)
+            self.temporary_path.write_bytes(b"x" * 2048)
             self.returncode = 0
             return "", ""
 
@@ -341,7 +343,7 @@ def test_run_clip_export_does_not_publish_when_canceled_during_validation(
     assert not thread.is_alive()
     assert result[0].status == "canceled"
     assert not output.exists()
-    assert not temporary.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
 
 
 @pytest.mark.parametrize("ffmpeg_returncode, has_video", [(1, True), (0, False)])
@@ -352,15 +354,15 @@ def test_run_clip_export_removes_temporary_output_after_failure(
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
     output = tmp_path / "clip.mp4"
-    temporary = tmp_path / "clip.part.mp4"
 
     class FailingPopen:
         def __init__(self, command, **kwargs):
             self.command = command
+            self.temporary_path = Path(command[-1])
             self.returncode = None
 
         def communicate(self, timeout=None):
-            temporary.write_bytes(b"x" * 2048)
+            self.temporary_path.write_bytes(b"x" * 2048)
             self.returncode = ffmpeg_returncode
             return "", "ffmpeg failed" if ffmpeg_returncode else ""
 
@@ -392,7 +394,7 @@ def test_run_clip_export_removes_temporary_output_after_failure(
 
     assert result.status == "fail"
     assert not output.exists()
-    assert not temporary.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
 
 
 def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
@@ -403,18 +405,18 @@ def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
     output = tmp_path / "clip.mp4"
-    temporary = tmp_path / "clip.part.mp4"
     started = threading.Event()
 
     class HangingPopen:
         def __init__(self, command, **kwargs):
             self.command = command
+            self.temporary_path = Path(command[-1])
             self.returncode = None
             self.terminated = False
             self.killed = False
 
         def communicate(self, timeout=None):
-            temporary.write_bytes(b"x" * 2048)
+            self.temporary_path.write_bytes(b"x" * 2048)
             started.set()
             raise subprocess.TimeoutExpired(self.command, timeout)
 
@@ -466,5 +468,5 @@ def test_run_clip_export_cancels_managed_process_and_removes_temporary_output(
     assert not thread.is_alive()
     assert result[0].status == "canceled"
     assert not output.exists()
-    assert not temporary.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
     assert processes[0].killed

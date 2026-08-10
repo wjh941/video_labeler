@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+import uuid
 
 
 MIN_VALID_OUTPUT_BYTES = 1024
@@ -160,7 +161,9 @@ def resolve_ffprobe(ffmpeg_path: str) -> str:
 
 
 def temporary_output_path(output_path: Path) -> Path:
-    return output_path.with_name(f"{output_path.stem}.part{output_path.suffix}")
+    return output_path.with_name(
+        f"{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix}"
+    )
 
 
 def validate_output_media(
@@ -255,7 +258,6 @@ def run_clip_export(
 ) -> ExportResult:
     output_name = request.output_path.name
     temporary_path = temporary_output_path(request.output_path)
-    owns_temporary_path = False
     try:
         if control is not None and control.is_canceled():
             return ExportResult(status="canceled", output=output_name)
@@ -271,10 +273,6 @@ def run_clip_export(
             raise FileNotFoundError(f"source video not found: {request.input_path}")
 
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
-        if temporary_path.exists():
-            raise FileExistsError(
-                f"temporary output already exists: {temporary_path}"
-            )
         command = build_command(
             request.ffmpeg,
             request.input_path,
@@ -290,7 +288,6 @@ def run_clip_export(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        owns_temporary_path = True
         if control is not None:
             control.register(process)
         try:
@@ -322,5 +319,4 @@ def run_clip_export(
     except Exception as error:
         return ExportResult(status="fail", output=output_name, error=str(error))
     finally:
-        if owns_temporary_path:
-            temporary_path.unlink(missing_ok=True)
+        temporary_path.unlink(missing_ok=True)
