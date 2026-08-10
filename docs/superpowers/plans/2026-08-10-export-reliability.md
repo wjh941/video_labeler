@@ -24,8 +24,8 @@ CSV, JSON, subprocess, pathlib, threading, and concurrent.futures.
 - Treat the project as a single-source exporter and refuse mixed-source export.
 - Do not treat FFmpeg zero exit status as a successful export without ffprobe
   validation.
-- Use `.part.mp4` temporary outputs and remove them after failed or canceled
-  jobs.
+- Use uniquely named sibling `.part.mp4` temporary outputs and remove them
+  after failed or canceled jobs.
 - Keep `workers=0` as an automatic setting that resolves to exactly two jobs.
 - Keep existing tests passing and add focused tests for each new behavior.
 
@@ -309,7 +309,13 @@ git commit -m "feat: add versioned project manifests"
 
 ```python
 def test_temporary_output_path_keeps_mp4_extension(tmp_path):
-    assert temporary_output_path(tmp_path / "clip.mp4").name == "clip.part.mp4"
+    first = temporary_output_path(tmp_path / "clip.mp4")
+    second = temporary_output_path(tmp_path / "clip.mp4")
+
+    assert first.parent == tmp_path
+    assert first.name.startswith("clip.")
+    assert first.name.endswith(".part.mp4")
+    assert first != second
 
 
 def test_validate_output_media_rejects_missing_video_stream(tmp_path, monkeypatch):
@@ -346,7 +352,7 @@ Expected: FAIL because temporary path and ffprobe validation APIs do not exist.
 ```python
 def temporary_output_path(output_path: Path) -> Path:
     return output_path.with_name(
-        f"{output_path.stem}.part{output_path.suffix}"
+        f"{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix}"
     )
 
 
