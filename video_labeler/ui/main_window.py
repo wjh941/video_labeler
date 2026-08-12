@@ -1,4 +1,5 @@
 from pathlib import Path
+import tempfile
 
 from PySide6.QtCore import QSignalBlocker, Qt, QUrl
 from PySide6.QtGui import QColor
@@ -901,6 +902,11 @@ class MainWindow(QMainWindow):
             self.output_dir.mkdir(parents=True, exist_ok=True)
             if not self.output_dir.is_dir():
                 raise OSError("output path is not a folder")
+            try:
+                with tempfile.NamedTemporaryFile(dir=self.output_dir, delete=True):
+                    pass
+            except OSError as error:
+                raise OSError(f"output folder is not writable: {error}") from error
             outputs = [record.output.lower() for record in self.records]
             if len(outputs) != len(set(outputs)):
                 raise ValueError("The task list contains duplicate output filenames.")

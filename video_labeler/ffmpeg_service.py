@@ -205,8 +205,8 @@ class ExportControl:
         self._lock = threading.Lock()
 
     def cancel(self) -> None:
-        self._canceled.set()
         with self._lock:
+            self._canceled.set()
             for process in tuple(self._processes):
                 if process.poll() is None:
                     process.terminate()
@@ -223,6 +223,13 @@ class ExportControl:
     def unregister(self, process: subprocess.Popen[str]) -> None:
         with self._lock:
             self._processes.discard(process)
+
+    def publish(self, temporary_path: Path, output_path: Path) -> bool:
+        with self._lock:
+            if self._canceled.is_set():
+                return False
+            temporary_path.replace(output_path)
+            return True
 
 
 def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -312,9 +319,11 @@ def run_clip_export(
             request.start
         )
         validate_output_media(request.ffprobe, temporary_path, expected_duration)
-        if control is not None and control.is_canceled():
-            return ExportResult(status="canceled", output=output_name)
-        temporary_path.replace(request.output_path)
+        if control is not None:
+            if not control.publish(temporary_path, request.output_path):
+                return ExportResult(status="canceled", output=output_name)
+        else:
+            temporary_path.replace(request.output_path)
         return ExportResult(status="ok", output=output_name)
     except Exception as error:
         return ExportResult(status="fail", output=output_name, error=str(error))

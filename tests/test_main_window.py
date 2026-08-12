@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -197,7 +198,9 @@ def test_start_export_rejects_mismatched_sources_before_creating_worker(
     errors = []
     FakeExportWorker.kwargs = {}
 
-    monkeypatch.setattr(window, "_show_error", lambda title, message: errors.append((title, message)))
+    monkeypatch.setattr(
+        window, "_show_error", lambda title, message: errors.append((title, message))
+    )
     monkeypatch.setattr(main_window_module, "ExportWorker", FakeExportWorker)
 
     window.start_export()
@@ -209,3 +212,43 @@ def test_start_export_rejects_mismatched_sources_before_creating_worker(
             "All clips must use the selected source video; mismatched rows: cam03.mp4",
         )
     ]
+
+
+def test_start_export_rejects_an_unwritable_output_directory_before_creating_worker(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    source = tmp_path / "cam02.mp4"
+    source.write_bytes(b"source")
+    window.source_path = source
+    window.output_dir = tmp_path / "out"
+    window.records = [
+        ClipRecord(
+            source="cam02.mp4",
+            start_seconds=2.5,
+            end_seconds=4.0,
+            output="20260729-cam02_panorama-dog_out-pos-daytime-001.mp4",
+        )
+    ]
+    errors = []
+    FakeExportWorker.kwargs = {}
+
+    monkeypatch.setattr(main_window_module, "resolve_ffmpeg", lambda _path: "ffmpeg.exe")
+    monkeypatch.setattr(main_window_module, "resolve_ffprobe", lambda _ffmpeg: "ffprobe.exe")
+    monkeypatch.setattr(
+        main_window_module,
+        "tempfile",
+        SimpleNamespace(
+            NamedTemporaryFile=lambda **_kwargs: (_ for _ in ()).throw(
+                OSError("access denied")
+            )
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(main_window_module, "ExportWorker", FakeExportWorker)
+    monkeypatch.setattr(window, "_show_error", lambda title, message: errors.append((title, message)))
+
+    window.start_export()
+
+    assert FakeExportWorker.kwargs == {}
+    assert errors == [("Cannot start export", "output folder is not writable: access denied")]

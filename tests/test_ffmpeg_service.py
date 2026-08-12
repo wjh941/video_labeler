@@ -346,6 +346,64 @@ def test_run_clip_export_does_not_publish_when_canceled_during_validation(
     assert not list(tmp_path.glob("clip.*.part.mp4"))
 
 
+def test_run_clip_export_does_not_publish_when_cancellation_wins_at_publication(
+    tmp_path, monkeypatch
+):
+    assert ExportControl is not None, "export process control API is not implemented"
+    assert run_clip_export is not None, "clip export execution API is not implemented"
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "clip.mp4"
+
+    class SuccessfulPopen:
+        def __init__(self, command, **kwargs):
+            self.temporary_path = Path(command[-1])
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            self.temporary_path.write_bytes(b"x" * 2048)
+            self.returncode = 0
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    class CancelAtPublicationBoundary(ExportControl):
+        def publish(self, temporary_path, output_path):
+            self.cancel()
+            return super().publish(temporary_path, output_path)
+
+    monkeypatch.setattr(subprocess, "Popen", SuccessfulPopen)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args,
+            0,
+            '{"format":{"duration":"2.0"},"streams":[{"codec_type":"video"}]}',
+            "",
+        ),
+    )
+
+    result = run_clip_export(
+        ExportRequest(
+            ffmpeg="ffmpeg.exe",
+            ffprobe="ffprobe.exe",
+            input_path=source,
+            output_path=output,
+            start="00:00:02.000",
+            end="00:00:04.000",
+            mode="encode",
+            overwrite=False,
+        ),
+        CancelAtPublicationBoundary(),
+    )
+
+    assert result.status == "canceled"
+    assert not output.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
+
+
 @pytest.mark.parametrize("ffmpeg_returncode, has_video", [(1, True), (0, False)])
 def test_run_clip_export_removes_temporary_output_after_failure(
     tmp_path, monkeypatch, ffmpeg_returncode, has_video
