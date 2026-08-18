@@ -37,3 +37,4 @@ class ClipRecord:
     sequence: int = 0
     status: str = "queued"
     error: str = ""
+    note: str = ""

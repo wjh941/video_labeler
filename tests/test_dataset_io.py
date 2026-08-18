@@ -14,6 +14,7 @@ def _record() -> ClipRecord:
         polarity="pos",
         lighting="daytime",
         sequence=1,
+        note="review after export",
     )
 
 
@@ -36,6 +37,7 @@ def test_dataset_exports_write_jsonl_records_and_yolo_label_files(tmp_path):
         "sequence": 1,
         "status": "queued",
         "error": "",
+        "note": "review after export",
     }
     assert (yolo_dir / "classes.txt").read_text(encoding="utf-8") == "dog_out\nfall\n"
     assert (yolo_dir / "labels" / "clip-001.txt").read_text(encoding="utf-8") == "0\n1\n"

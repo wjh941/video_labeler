@@ -15,6 +15,8 @@ class SegmentTimelineSlider(QSlider):
         self._segment_start: int | None = None
         self._segment_end: int | None = None
         self._dragged_edge: str | None = None
+        self.setMouseTracking(True)
+        self.setToolTip("拖动片段左右边缘调整起止时间")
 
     def set_segment_range(self, start: int, end: int) -> None:
         low = self.minimum()
@@ -54,22 +56,21 @@ class SegmentTimelineSlider(QSlider):
         painter.setBrush(QColor("#0EA5A4"))
         left = self._position_for_value(segment[0])
         right = self._position_for_value(segment[1])
+        center_y = self.height() / 2
         painter.drawRoundedRect(
-            QRectF(left, self.height() / 2 - 3, max(4, right - left), 6), 3, 3
+            QRectF(left, center_y - 3, max(4, right - left), 6), 3, 3
         )
+        painter.setBrush(QColor("#1677FF"))
+        for position in (left, right):
+            painter.drawRoundedRect(
+                QRectF(position - 4, center_y - 7, 8, 14), 4, 4
+            )
 
     def mousePressEvent(self, event) -> None:
         segment = self.segment_range()
         if event.button() == Qt.MouseButton.LeftButton and segment is not None:
-            position = event.position().x()
-            start = self._position_for_value(segment[0])
-            end = self._position_for_value(segment[1])
-            if abs(position - start) <= 10:
-                self._dragged_edge = "start"
-                event.accept()
-                return
-            if abs(position - end) <= 10:
-                self._dragged_edge = "end"
+            self._dragged_edge = self._edge_at_position(event.position().x())
+            if self._dragged_edge is not None:
                 event.accept()
                 return
         super().mousePressEvent(event)
@@ -81,6 +82,12 @@ class SegmentTimelineSlider(QSlider):
             )
             event.accept()
             return
+        edge = self._edge_at_position(event.position().x())
+        self.setCursor(
+            Qt.CursorShape.SizeHorCursor
+            if edge is not None
+            else Qt.CursorShape.ArrowCursor
+        )
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
@@ -89,6 +96,21 @@ class SegmentTimelineSlider(QSlider):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._dragged_edge is None:
+            self.unsetCursor()
+        super().leaveEvent(event)
+
+    def _edge_at_position(self, position: float) -> str | None:
+        segment = self.segment_range()
+        if segment is None:
+            return None
+        if abs(position - self._position_for_value(segment[0])) <= 10:
+            return "start"
+        if abs(position - self._position_for_value(segment[1])) <= 10:
+            return "end"
+        return None
 
     def _position_for_value(self, value: int) -> int:
         groove = self._groove_rect()

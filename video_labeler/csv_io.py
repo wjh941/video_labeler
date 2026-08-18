@@ -7,7 +7,8 @@ from .models import ClipRecord
 from .naming import parse_filename
 
 
-CSV_FIELDS = ("source", "start", "end", "output")
+CSV_REQUIRED_FIELDS = ("source", "start", "end", "output")
+CSV_FIELDS = (*CSV_REQUIRED_FIELDS, "note")
 
 
 def _parse_seconds(value: str) -> float:
@@ -51,6 +52,7 @@ def write_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                     "start": _format_seconds(record.start_seconds),
                     "end": _format_seconds(record.end_seconds),
                     "output": record.output,
+                    "note": record.note,
                 }
             )
 
@@ -59,13 +61,15 @@ def read_clip_csv(path: Path) -> list[ClipRecord]:
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
         fieldnames = set(reader.fieldnames or ())
-        missing = set(CSV_FIELDS) - fieldnames
+        missing = set(CSV_REQUIRED_FIELDS) - fieldnames
         if missing:
             raise ValueError(f"CSV missing columns: {', '.join(sorted(missing))}")
 
         records = []
         for index, row in enumerate(reader, start=2):
-            if not any((row.get(field) or "").strip() for field in CSV_FIELDS):
+            if not any(
+                (row.get(field) or "").strip() for field in CSV_REQUIRED_FIELDS
+            ):
                 continue
 
             source = (row.get("source") or "").strip()
@@ -91,6 +95,7 @@ def read_clip_csv(path: Path) -> list[ClipRecord]:
                     polarity=parsed.polarity if parsed else "",
                     lighting=parsed.lighting if parsed else "",
                     sequence=parsed.sequence if parsed else 0,
+                    note=row.get("note") or "",
                 )
             )
 

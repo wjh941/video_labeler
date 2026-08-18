@@ -32,6 +32,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -120,6 +121,7 @@ from ..preferences_io import (
     save_hotkey_preferences,
 )
 from ..segment_timeline import SegmentTimelineSlider
+from ..themes import apply_dark_fresh_theme, apply_light_fresh_theme
 
 
 TABLE_COLUMNS = (
@@ -133,6 +135,7 @@ TABLE_COLUMNS = (
     "输出文件名",
     "状态",
     "错误信息",
+    "备注",
 )
 CUSTOM_OPTION_TEXT = "自定义..."
 CUSTOM_PLAYBACK_RATE_TEXT = "自定义"
@@ -790,7 +793,23 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.restore_project_action)
         self.settings_menu = self.menuBar().addMenu("设置")
         self.hotkey_settings_action = QAction("配置快捷键", self)
+        self.dark_mode_action = QAction("深色模式", self)
+        self.dark_mode_action.setCheckable(True)
         self.settings_menu.addAction(self.hotkey_settings_action)
+        self.settings_menu.addAction(self.dark_mode_action)
+
+    def set_dark_mode(self, enabled: bool) -> None:
+        application = QApplication.instance()
+        if application is None:
+            return
+        if enabled:
+            apply_dark_fresh_theme(application)
+            self.video_scene.setBackgroundBrush(QColor("#090E16"))
+            self.video_placeholder_item.setBrush(QColor("#C7D2E3"))
+        else:
+            apply_light_fresh_theme(application)
+            self.video_scene.setBackgroundBrush(QColor("#1F2937"))
+            self.video_placeholder_item.setBrush(QColor("#B9C8D9"))
 
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
@@ -955,6 +974,14 @@ class MainWindow(QMainWindow):
             cell_layout.addWidget(control)
             time_layout.addWidget(cell)
         layout.addLayout(time_layout)
+
+        note_layout = QHBoxLayout()
+        note_layout.setSpacing(8)
+        note_layout.addWidget(QLabel("备注"))
+        self.note_edit = QLineEdit()
+        self.note_edit.setPlaceholderText("可选：记录复核或导出说明")
+        note_layout.addWidget(self.note_edit, stretch=1)
+        layout.addLayout(note_layout)
 
         self.add_button = QPushButton("添加片段")
         self.remove_button = QPushButton("删除所选")
@@ -1274,7 +1301,9 @@ class MainWindow(QMainWindow):
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
-        for column, width in enumerate((72, 98, 98, 82, 210, 72, 150, 430, 80, 260)):
+        for column, width in enumerate(
+            (72, 98, 98, 82, 210, 72, 150, 430, 80, 260, 220)
+        ):
             self.task_table.setColumnWidth(column, width)
 
         self.table_filter_bar = QWidget()
@@ -1313,6 +1342,20 @@ class MainWindow(QMainWindow):
         self.sort_combo.addItem("时长升序", ("duration", False))
         self.sort_combo.addItem("时长降序", ("duration", True))
         self.clear_filters_button = QPushButton("清空筛选")
+
+        self.table_filter_search_row = QWidget()
+        search_filter_layout = QHBoxLayout(self.table_filter_search_row)
+        search_filter_layout.setContentsMargins(0, 0, 0, 0)
+        search_filter_layout.setSpacing(8)
+        search_filter_layout.addWidget(QLabel("搜索"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setPlaceholderText("搜索标签、备注或视频文件名")
+        search_filter_layout.addWidget(self.search_edit, stretch=1)
+        self.filter_result_label = QLabel()
+        self.filter_result_label.setObjectName("mutedLabel")
+        search_filter_layout.addWidget(self.filter_result_label)
+        filter_layout.addWidget(self.table_filter_search_row)
 
         self.table_filter_primary_row = QWidget()
         primary_filter_layout = QHBoxLayout(self.table_filter_primary_row)
@@ -1545,6 +1588,7 @@ class MainWindow(QMainWindow):
         self.hotkey_settings_action.triggered.connect(
             self.show_hotkey_settings
         )
+        self.dark_mode_action.toggled.connect(self.set_dark_mode)
         self.project_video_combo.currentIndexChanged.connect(
             lambda index: self.switch_active_video(
                 self.project_video_combo.itemData(index)
@@ -1621,6 +1665,7 @@ class MainWindow(QMainWindow):
         self.status_filter_combo.currentIndexChanged.connect(
             self._apply_table_filters
         )
+        self.search_edit.textChanged.connect(self._apply_table_filters)
         self.sort_combo.currentIndexChanged.connect(self._sort_records)
         self.clear_filters_button.clicked.connect(self.clear_table_filters)
         self.task_table.itemSelectionChanged.connect(self._load_selected_clip)
@@ -2635,6 +2680,7 @@ class MainWindow(QMainWindow):
             polarity=polarity,
             lighting=lighting,
             sequence=sequence,
+            note=self.note_edit.text().strip(),
         )
         before = list(self.records)
         is_new_record = self._editing_index is None
@@ -2688,6 +2734,7 @@ class MainWindow(QMainWindow):
         self._rebuild_behavior_controls(())
         self.polarity_combo.setCurrentIndex(0)
         self.lighting_combo.setCurrentIndex(0)
+        self.note_edit.clear()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -2700,6 +2747,7 @@ class MainWindow(QMainWindow):
         self.set_clip_range(saved_end_seconds, saved_end_seconds)
         self.historical_behavior_tags = ()
         self._rebuild_behavior_controls(())
+        self.note_edit.clear()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -2853,6 +2901,7 @@ class MainWindow(QMainWindow):
                     record.output,
                     STATUS_LABELS.get(record.status, record.status),
                     record.error,
+                    record.note,
                 )
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(value)
@@ -2910,25 +2959,47 @@ class MainWindow(QMainWindow):
         behavior = self.behavior_filter_combo.currentData()
         polarity = self.polarity_filter_combo.currentData()
         status = self.status_filter_combo.currentData()
+        search_text = self.search_edit.text().strip().casefold()
         selection_model = self.task_table.selectionModel()
+        visible_count = 0
         for row, record in enumerate(self.records):
             visible = (
                 (behavior is None or behavior in record.behaviors)
                 and (polarity is None or polarity == record.polarity)
                 and (status is None or status == record.status)
+                and (
+                    not search_text
+                    or search_text
+                    in " ".join(
+                        (record.source, *record.behaviors, record.note)
+                    ).casefold()
+                )
             )
             self.task_table.setRowHidden(row, not visible)
+            if visible:
+                visible_count += 1
             if not visible:
                 selection_model.select(
                     self.task_table.model().index(row, 0),
                     QItemSelectionModel.SelectionFlag.Deselect
                     | QItemSelectionModel.SelectionFlag.Rows,
                 )
+        if not self.records:
+            self.filter_result_label.setText("暂无片段任务")
+        elif visible_count:
+            self.filter_result_label.setText(
+                f"显示 {visible_count}/{len(self.records)} 个片段"
+            )
+        else:
+            self.filter_result_label.setText(
+                f"没有匹配的片段 (0/{len(self.records)})，请清空筛选。"
+            )
 
     def clear_table_filters(self) -> None:
         self.behavior_filter_combo.setCurrentIndex(0)
         self.polarity_filter_combo.setCurrentIndex(0)
         self.status_filter_combo.setCurrentIndex(0)
+        self.search_edit.clear()
         self._apply_table_filters()
 
     def _sort_records(self) -> None:
@@ -2972,6 +3043,7 @@ class MainWindow(QMainWindow):
         self.start_spin.setValue(record.start_seconds)
         self.end_spin.setValue(record.end_seconds)
         self.sequence_spin.setValue(max(1, record.sequence))
+        self.note_edit.setText(record.note)
         self._rebuild_behavior_controls(record.behaviors)
         parsed = parse_filename(record.output)
         if parsed is not None:
@@ -3258,6 +3330,68 @@ class MainWindow(QMainWindow):
             return
         self._start_export(records, input_paths, project_queue=True)
 
+    @staticmethod
+    def _format_export_size(byte_count: int | None) -> str:
+        if byte_count is None:
+            return "无法估算"
+        size = float(byte_count)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if size < 1024 or unit == "TB":
+                return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+            size /= 1024
+        return f"{int(byte_count)} B"
+
+    @staticmethod
+    def _estimate_export_bytes(
+        records: Sequence[ClipRecord], input_paths: Sequence[Path]
+    ) -> int | None:
+        grouped: dict[Path, list[ClipRecord]] = {}
+        for record, source_path in zip(records, input_paths):
+            grouped.setdefault(Path(source_path), []).append(record)
+
+        estimated_bytes = 0.0
+        has_estimate = False
+        for source_path, source_records in grouped.items():
+            try:
+                source_bytes = source_path.stat().st_size
+            except OSError:
+                continue
+            observed_duration = max(
+                record.end_seconds for record in source_records
+            )
+            selected_duration = sum(
+                record.end_seconds - record.start_seconds
+                for record in source_records
+            )
+            if observed_duration <= 0 or selected_duration <= 0:
+                continue
+            estimated_bytes += source_bytes * selected_duration / observed_duration
+            has_estimate = True
+        return round(estimated_bytes) if has_estimate else None
+
+    def _confirm_export_preview(
+        self, records: Sequence[ClipRecord], input_paths: Sequence[Path]
+    ) -> bool:
+        total_duration = sum(
+            record.end_seconds - record.start_seconds for record in records
+        )
+        estimate = self._estimate_export_bytes(records, input_paths)
+        estimate_text = self._format_export_size(estimate)
+        answer = QMessageBox.question(
+            self,
+            "导出预览",
+            (
+                f"将导出 {len(records)} 个片段，合计时长 "
+                f"{format_seconds(total_duration)}。\n"
+                f"预计磁盘占用：{estimate_text}\n"
+                "估算按源视频平均码率计算，实际大小会随编码模式变化。\n\n"
+                "是否开始导出？"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
     def _start_export(
         self,
         records: Sequence[ClipRecord],
@@ -3275,8 +3409,6 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
-            ffprobe = resolve_ffprobe(ffmpeg)
             self.output_dir.mkdir(parents=True, exist_ok=True)
             if not self.output_dir.is_dir():
                 raise OSError("输出路径不是文件夹")
@@ -3285,6 +3417,19 @@ class MainWindow(QMainWindow):
                 raise ValueError("任务列表中包含重复的输出文件名。")
             for record in records:
                 validate_output_filename(record.output)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._show_error(
+                "无法开始导出", f"开始导出失败：{self._file_error_tip(error)}"
+            )
+            return
+
+        if not self._confirm_export_preview(records, input_paths):
+            self._set_status("已取消导出")
+            return
+
+        try:
+            ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
+            ffprobe = resolve_ffprobe(ffmpeg)
         except (OSError, RuntimeError, ValueError) as error:
             self._show_error(
                 "无法开始导出", f"开始导出失败：{self._file_error_tip(error)}"

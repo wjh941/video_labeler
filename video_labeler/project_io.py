@@ -297,6 +297,7 @@ def _record_to_dict(record: ClipRecord) -> dict[str, Any]:
         "sequence": record.sequence,
         "status": record.status,
         "error": record.error,
+        "note": record.note,
     }
 
 
@@ -312,6 +313,7 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         sequence=document["sequence"],
         status=document["status"],
         error=document["error"],
+        note=document.get("note", ""),
     )
 
 
@@ -477,10 +479,23 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "status",
         "error",
     }
-    if not isinstance(document, dict) or set(document) != required_keys:
+    optional_keys = {"note"}
+    if (
+        not isinstance(document, dict)
+        or not required_keys.issubset(document)
+        or set(document) - (required_keys | optional_keys)
+    ):
         raise ValueError("segment record is invalid")
-    for key in ("source", "output", "polarity", "lighting", "status", "error"):
-        if not isinstance(document[key], str):
+    for key in (
+        "source",
+        "output",
+        "polarity",
+        "lighting",
+        "status",
+        "error",
+        "note",
+    ):
+        if not isinstance(document.get(key, ""), str):
             raise ValueError(f"segment {key} must be a string")
     for key in ("start_seconds", "end_seconds"):
         if not _is_number(document[key]):
@@ -504,6 +519,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "sequence": document["sequence"],
         "status": document["status"],
         "error": document["error"],
+        "note": document.get("note", ""),
     }
 
 

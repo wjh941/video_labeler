@@ -25,6 +25,7 @@ def write_clip_jsonl(path: Path, records: Sequence[ClipRecord]) -> None:
                         "sequence": record.sequence,
                         "status": record.status,
                         "error": record.error,
+                        "note": record.note,
                     },
                     ensure_ascii=False,
                 )

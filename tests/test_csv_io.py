@@ -24,6 +24,7 @@ def _record() -> object:
         polarity="pos",
         lighting="daytime",
         sequence=1,
+        note="review after export",
     )
 
 
@@ -36,10 +37,11 @@ def test_write_clip_csv_uses_batch_script_headers_and_bom(tmp_path):
     raw = csv_path.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     assert raw.decode("utf-8-sig").splitlines() == [
-        "source,start,end,output",
+        "source,start,end,output,note",
         (
             "cam02_20260729.mp4,00:00:02.500,00:00:04.000,"
-            "20260729-cam02_panorama-dog_out-pos-daytime-001.mp4"
+            "20260729-cam02_panorama-dog_out-pos-daytime-001.mp4,"
+            "review after export"
         ),
     ]
 
@@ -65,6 +67,22 @@ def test_read_clip_csv_restores_times_and_standard_filename_labels(tmp_path):
     assert record.polarity == "neg"
     assert record.lighting == "daytime"
     assert record.sequence == 21
+    assert record.note == ""
+
+
+def test_read_clip_csv_restores_optional_note(tmp_path):
+    _require_csv_api()
+    csv_path = tmp_path / "clips.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output,note\n"
+            "cam02.mp4,00:00:02.500,00:00:04.000,"
+            "20260729-cam02_closeup-dog_out-neg-daytime-021.mp4,needs review\n"
+        ),
+        encoding="utf-8-sig",
+    )
+
+    assert read_clip_csv(csv_path)[0].note == "needs review"
 
 
 def test_read_clip_csv_restores_custom_filename_labels(tmp_path):

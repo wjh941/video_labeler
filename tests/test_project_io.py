@@ -29,6 +29,7 @@ def test_project_round_trip_preserves_absolute_paths_segments_and_settings(tmp_p
             sequence=1,
             status="completed",
             error="",
+            note="manual review complete",
         )
     )
     project.global_settings = {"date": "20260729", "camera": "cam02"}
@@ -201,6 +202,38 @@ def test_legacy_project_without_custom_behavior_tags_loads_an_empty_list(tmp_pat
     )
 
     assert load_project(target).custom_behavior_tags == []
+
+
+def test_legacy_project_without_segment_note_loads_an_empty_note(tmp_path):
+    from video_labeler.project_io import load_project
+
+    target = tmp_path / "legacy.labelproj"
+    target.write_text(
+        """{
+          "version": 1,
+          "active_video_id": "video-1",
+          "global_settings": {},
+          "videos": [{
+            "id": "video-1",
+            "path": "C:/camera.mp4",
+            "segments": [{
+              "source": "camera.mp4",
+              "start_seconds": 1,
+              "end_seconds": 2,
+              "output": "clip.mp4",
+              "behaviors": [],
+              "polarity": "",
+              "lighting": "",
+              "sequence": 1,
+              "status": "queued",
+              "error": ""
+            }]
+          }]
+        }""",
+        encoding="utf-8",
+    )
+
+    assert load_project(target).videos[0].segments[0].note == ""
 
 
 def test_save_normalizes_extension_without_changing_existing_backup_filename(tmp_path):

@@ -4,7 +4,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from video_labeler.themes import apply_light_fresh_theme, load_light_fresh_theme
+from video_labeler.themes import (
+    apply_dark_fresh_theme,
+    apply_light_fresh_theme,
+    load_dark_fresh_theme,
+    load_light_fresh_theme,
+)
 
 
 def test_light_fresh_theme_loads_global_dialog_and_tooltip_rules():
@@ -92,3 +97,29 @@ def test_light_theme_contains_ant_desktop_tokens_and_eight_pixel_radius():
         "border-radius: 8px",
     ):
         assert token in stylesheet
+
+
+def test_dark_theme_covers_the_same_widget_surface_as_light_theme():
+    app = QApplication.instance() or QApplication([])
+
+    apply_dark_fresh_theme(app)
+
+    stylesheet = load_dark_fresh_theme()
+    assert app.styleSheet() == stylesheet
+    assert stylesheet != load_light_fresh_theme()
+    for selector in (
+        "QMainWindow",
+        "QDialog",
+        "QMenu",
+        "QPushButton",
+        "QLineEdit",
+        "QComboBox",
+        "QCheckBox",
+        "QTableWidget",
+        "QHeaderView::section",
+        "QProgressBar",
+        "QGraphicsView#videoSurface",
+        "QPlainTextEdit",
+        "QKeySequenceEdit",
+    ):
+        assert selector in stylesheet

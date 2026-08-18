@@ -116,3 +116,34 @@ pyinstaller --noconfirm --windowed --name VideoSegmentLabeler --collect-all PySi
 - FFmpeg 和 FFprobe 为外部依赖，未安装、损坏或编解码器不兼容时无法导出。
 - 全工程导出会在开始前检查含片段的视频源是否存在；缺失源视频需要先恢复路径。
 - 真实媒体端到端测试需要用户提供本地样本，不包含媒体文件于仓库。
+
+## PyInstaller 打包与部署
+
+仓库根目录的 `VideoSegmentLabeler.spec` 是 Windows 的 one-folder 打包配置。它会收集程序的 Qt 多媒体依赖、主题文件和 `start.bat`，但**不会**将 `ffmpeg.exe` 或 `ffprobe.exe` 写入安装包。
+
+在已安装项目依赖的 PowerShell 中执行：
+
+```powershell
+python -m pip install pyinstaller
+python -m PyInstaller --noconfirm --clean VideoSegmentLabeler.spec
+```
+
+构建产物位于 `dist\VideoSegmentLabeler`。发布时保留该目录中的全部文件，双击其中的 `start.bat` 启动；脚本会将工作目录设为应用所在目录。不要单独移动 `VideoSegmentLabeler.exe`，否则 Qt 运行时和主题资源将无法找到。
+
+### FFmpeg / FFprobe 外部安装
+
+从可信的 Windows FFmpeg 发布页下载构建包，解压后将包含 `ffmpeg.exe` 与 `ffprobe.exe` 的 `bin` 目录加入系统 `PATH`，然后重新打开终端并验证：
+
+```powershell
+ffmpeg -version
+ffprobe -version
+```
+
+也可以在程序的 FFmpeg 设置中填写 `ffmpeg.exe` 的绝对路径；程序会在同一目录查找 `ffprobe.exe`。发布包不会提供或更新这两个工具。
+
+### 部署检查与限制
+
+- 构建机需要 Python、`requirements.txt` 中的依赖和额外安装的 PyInstaller。
+- 目标机器需要可用的 FFmpeg/FFprobe，并且实际可用的编解码器取决于该系统安装的 FFmpeg 构建。
+- 当前仓库没有应用图标资源，因此打包产物使用 Windows 默认图标；添加 `.ico` 资源后再在 spec 中配置即可。
+- 建议在目标机器导入一个短视频并导出一个片段，确认读写权限、视频编解码器和 FFmpeg 路径均正确。

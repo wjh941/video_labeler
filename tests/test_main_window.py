@@ -7,12 +7,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import (
     QAbstractAnimation,
+    QEvent,
     QItemSelectionModel,
     QPoint,
+    QPointF,
     QSignalBlocker,
     Qt,
 )
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QKeySequence, QMouseEvent
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -25,6 +27,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSlider,
+    QStyle,
+    QStyleOptionSlider,
     QTableWidget,
 )
 
@@ -109,11 +113,14 @@ def test_add_clip_prepares_next_clip_and_keeps_fixed_metadata(qt_app, tmp_path):
     window.behavior_checks["fall"].setChecked(True)
     window.polarity_combo.setCurrentText("neg")
     window.lighting_combo.setCurrentText("night_full_color")
+    window.note_edit.setText("review before export")
     window.set_clip_range(1.0, 2.0)
 
     window.add_or_update_clip()
 
     assert len(window.records) == 1
+    assert window.records[0].note == "review before export"
+    assert window.note_edit.text() == ""
     assert window.sequence_spin.value() == 2
     assert window.start_spin.value() == pytest.approx(2.0)
     assert window.end_spin.value() == pytest.approx(2.0)
@@ -171,6 +178,7 @@ def test_selecting_clip_restores_all_annotation_fields(qt_app):
             polarity="neg",
             lighting="night_full_color",
             sequence=7,
+            note="check occlusion",
         )
     ]
     window._refresh_table()
@@ -178,6 +186,7 @@ def test_selecting_clip_restores_all_annotation_fields(qt_app):
     qt_app.processEvents()
 
     assert window._editing_index == 0
+    assert window.note_edit.text() == "check occlusion"
     assert window.start_spin.value() == pytest.approx(12.5)
     assert window.end_spin.value() == pytest.approx(18.75)
     assert window.sequence_spin.value() == 7
@@ -643,6 +652,7 @@ def test_export_status_change_marks_saved_project_dirty_and_persists(
             status="fail", output=request.output_path.name, error="simulated failure"
         ),
     )
+    monkeypatch.setattr(window, "_confirm_export_preview", lambda *_args: True)
 
     window.start_export()
     _wait_for_export_completion(qt_app, window)
@@ -681,6 +691,7 @@ def test_export_passes_resolved_ffprobe_to_each_clip(qt_app, tmp_path, monkeypat
             or ExportResult(status="ok", output=request.output_path.name)
         ),
     )
+    monkeypatch.setattr(window, "_confirm_export_preview", lambda *_args: True)
 
     window.start_export()
     _wait_for_export_completion(qt_app, window)
@@ -765,6 +776,7 @@ def test_whole_project_export_uses_each_project_video_source(
             or ExportResult(status="ok", output=request.output_path.name)
         ),
     )
+    monkeypatch.setattr(window, "_confirm_export_preview", lambda *_args: True)
 
     window.start_project_export()
     _wait_for_export_completion(qt_app, window)
@@ -815,6 +827,7 @@ def test_export_with_unchanged_record_state_keeps_saved_project_clean(
             status="skip", output=request.output_path.name
         ),
     )
+    monkeypatch.setattr(window, "_confirm_export_preview", lambda *_args: True)
 
     window.start_export()
     _wait_for_export_completion(qt_app, window)
@@ -847,6 +860,7 @@ def test_export_status_change_without_saved_project_keeps_project_clean(
             status="ok", output=request.output_path.name
         ),
     )
+    monkeypatch.setattr(window, "_confirm_export_preview", lambda *_args: True)
 
     window.start_export()
     _wait_for_export_completion(qt_app, window)
@@ -1906,6 +1920,51 @@ def test_timeline_segment_edge_adjustment_updates_clip_time_controls(qt_app):
     assert window.end_spin.value() == pytest.approx(4.0)
 
 
+def test_timeline_discloses_draggable_segment_edges(qt_app):
+    from video_labeler.segment_timeline import SegmentTimelineSlider
+
+    slider = SegmentTimelineSlider()
+    slider.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+    slider.resize(400, 32)
+    slider.setRange(0, 100)
+    slider.set_segment_range(25, 75)
+    slider.show()
+    qt_app.processEvents()
+
+    option = QStyleOptionSlider()
+    slider.initStyleOption(option)
+    groove = slider.style().subControlRect(
+        QStyle.ComplexControl.CC_Slider,
+        option,
+        QStyle.SubControl.SC_SliderGroove,
+        slider,
+    )
+    start_position = groove.x() + QStyle.sliderPositionFromValue(
+        slider.minimum(), slider.maximum(), 25, max(0, groove.width() - 1)
+    )
+
+    local_position = QPointF(start_position, slider.height() / 2)
+    global_position = QPointF(
+        slider.mapToGlobal(QPoint(start_position, slider.height() // 2))
+    )
+    QApplication.sendEvent(
+        slider,
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            local_position,
+            global_position,
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        ),
+    )
+
+    assert "拖动" in slider.toolTip()
+    assert slider.cursor().shape() == Qt.CursorShape.SizeHorCursor
+    slider.close()
+    qt_app.processEvents()
+
+
 def test_applying_reviewed_preannotations_adds_labeled_segments(qt_app, tmp_path):
     from video_labeler.preannotation_io import PreAnnotation
 
@@ -2205,6 +2264,118 @@ def test_task_table_displays_chinese_status_without_changing_record_status(qt_ap
         "已取消",
     ]
     assert [record.status for record in window.records] == list(statuses)
+
+
+def test_shift_click_selects_the_continuous_segment_range(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="source.mp4",
+            start_seconds=index,
+            end_seconds=index + 1,
+            output=f"clip-{index}.mp4",
+            sequence=index,
+        )
+        for index in range(1, 4)
+    ]
+    window._refresh_table()
+
+    QTest.mouseClick(
+        window.task_table.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        window.task_table.visualRect(window.task_table.model().index(0, 0)).center(),
+    )
+    QTest.mouseClick(
+        window.task_table.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        window.task_table.visualRect(window.task_table.model().index(2, 0)).center(),
+    )
+    QTest.keyRelease(window.task_table, Qt.Key.Key_Shift)
+    assert QApplication.keyboardModifiers() == Qt.KeyboardModifier.NoModifier
+
+    assert [index.row() for index in window.task_table.selectionModel().selectedRows()] == [
+        0,
+        1,
+        2,
+    ]
+
+
+def test_global_search_matches_tags_notes_and_source_filename(qt_app):
+    window = MainWindow()
+    window.records = [
+        ClipRecord(
+            source="garage_camera.mp4",
+            start_seconds=0,
+            end_seconds=1,
+            output="first.mp4",
+            behaviors=("fall",),
+            note="",
+            sequence=1,
+        ),
+        ClipRecord(
+            source="door_camera.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="second.mp4",
+            behaviors=("dog_out",),
+            note="needs human review",
+            sequence=2,
+        ),
+    ]
+    window._refresh_table()
+    assert "2/2" in window.filter_result_label.text()
+
+    window.search_edit.setText("fall")
+    assert not window.task_table.isRowHidden(0)
+    assert window.task_table.isRowHidden(1)
+
+    window.search_edit.setText("HUMAN REVIEW")
+    assert window.task_table.isRowHidden(0)
+    assert not window.task_table.isRowHidden(1)
+
+    window.search_edit.setText("garage_camera")
+    assert not window.task_table.isRowHidden(0)
+    assert window.task_table.isRowHidden(1)
+
+    window.search_edit.setText("no matching segment")
+    assert "0/2" in window.filter_result_label.text()
+    assert "清空筛选" in window.filter_result_label.text()
+
+
+def test_export_preview_shows_count_and_space_estimate_before_starting(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"x" * 4096)
+    window.output_dir = tmp_path / "exports"
+    record = ClipRecord(
+        source=source.name,
+        start_seconds=2,
+        end_seconds=4,
+        output="clip.mp4",
+        sequence=1,
+    )
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(
+            lambda _parent, title, text, *_args: (
+                messages.append((title, text))
+                or QMessageBox.StandardButton.No
+            )
+        ),
+    )
+
+    window._start_export([record], [source])
+
+    assert window._export_worker is None
+    assert messages and messages[0][0] == "导出预览"
+    assert "1" in messages[0][1]
+    assert "预计" in messages[0][1]
 
 
 def test_duplicate_filename_error_uses_chinese_context_and_keeps_filename(
