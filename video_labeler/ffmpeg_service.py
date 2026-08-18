@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import threading
@@ -9,6 +10,9 @@ import uuid
 
 
 MIN_VALID_OUTPUT_BYTES = 1024
+_TEMPORARY_OUTPUT_NAME = re.compile(
+    r"^.+\.[0-9a-f]{32}\.part\.mp4$", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -169,6 +173,29 @@ def temporary_output_path(output_path: Path) -> Path:
     return output_path.with_name(
         f"{output_path.stem}.{uuid.uuid4().hex}.part{output_path.suffix}"
     )
+
+
+def find_orphaned_temporary_outputs(output_dir: Path) -> list[Path]:
+    directory = Path(output_dir)
+    if not directory.is_dir():
+        return []
+    return [
+        candidate
+        for candidate in directory.iterdir()
+        if candidate.is_file()
+        and _TEMPORARY_OUTPUT_NAME.fullmatch(candidate.name)
+    ]
+
+
+def cleanup_orphaned_temporary_outputs(output_dir: Path) -> list[Path]:
+    removed = []
+    for candidate in find_orphaned_temporary_outputs(output_dir):
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            continue
+        removed.append(candidate)
+    return removed
 
 
 def validate_output_media(
@@ -334,7 +361,16 @@ def run_clip_export(
         else:
             temporary_path.replace(request.output_path)
         return ExportResult(status="ok", output=output_name)
+    except PermissionError:
+        return ExportResult(
+            status="fail",
+            output=output_name,
+            error="访问被拒绝。请检查输出文件夹写入权限，并关闭占用该文件的程序后重试。",
+        )
     except Exception as error:
         return ExportResult(status="fail", output=output_name, error=str(error))
     finally:
-        temporary_path.unlink(missing_ok=True)
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass

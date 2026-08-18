@@ -70,10 +70,18 @@ class ExportWorker(QThread):
         mode: str,
         overwrite: bool,
         workers: int = 0,
+        input_paths: Sequence[Path] | None = None,
     ) -> None:
         super().__init__()
         self._records = list(records)
+        if input_paths is not None and len(input_paths) != len(self._records):
+            raise ValueError("input_paths must match the number of records")
         self._input_path = input_path
+        self._input_paths = (
+            list(input_paths)
+            if input_paths is not None
+            else [input_path] * len(self._records)
+        )
         self._output_dir = output_dir
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
@@ -108,7 +116,7 @@ class ExportWorker(QThread):
                     request = ExportRequest(
                         ffmpeg=self._ffmpeg,
                         ffprobe=self._ffprobe,
-                        input_path=self._input_path,
+                        input_path=self._input_paths[next_index],
                         output_path=self._output_dir / record.output,
                         start=format_seconds(record.start_seconds),
                         end=format_seconds(record.end_seconds),
@@ -161,5 +169,8 @@ class ExportWorker(QThread):
             for index, result in enumerate(results)
             if result is not None and result.status == "fail"
         ]
-        write_failed_report(self._output_dir / "failed_clips.csv", failures)
+        try:
+            write_failed_report(self._output_dir / "failed_clips.csv", failures)
+        except OSError:
+            pass
         self.export_completed.emit(ExportSummary.from_results(completed_results))

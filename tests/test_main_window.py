@@ -689,6 +689,106 @@ def test_export_passes_resolved_ffprobe_to_each_clip(qt_app, tmp_path, monkeypat
     assert captured_requests[0][1] is not None
 
 
+def test_loading_project_cleans_orphaned_export_parts_after_confirmation(
+    qt_app, tmp_path, monkeypatch
+):
+    from video_labeler.project_io import new_project, save_project
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    orphan = output_dir / ("clip." + "a" * 32 + ".part.mp4")
+    user_media = output_dir / "user.part.mp4"
+    orphan.write_bytes(b"partial")
+    user_media.write_bytes(b"user media")
+    project = new_project()
+    project.global_settings["output_dir"] = str(output_dir)
+    project_path = save_project(tmp_path / "work.labelproj", project)
+    window = MainWindow()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes),
+    )
+
+    assert window._load_project_path(project_path)
+    assert not orphan.exists()
+    assert user_media.exists()
+
+
+def test_loading_project_keeps_orphaned_export_parts_when_cleanup_is_skipped(
+    qt_app, tmp_path, monkeypatch
+):
+    from video_labeler.project_io import new_project, save_project
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    orphan = output_dir / ("clip." + "a" * 32 + ".part.mp4")
+    orphan.write_bytes(b"partial")
+    project = new_project()
+    project.global_settings["output_dir"] = str(output_dir)
+    project_path = save_project(tmp_path / "work.labelproj", project)
+    window = MainWindow()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.No),
+    )
+
+    assert window._load_project_path(project_path)
+    assert orphan.exists()
+
+
+def test_whole_project_export_uses_each_project_video_source(
+    qt_app, tmp_path, monkeypatch
+):
+    first_source = tmp_path / "first.mp4"
+    second_source = tmp_path / "second.mp4"
+    first_source.touch()
+    second_source.touch()
+    window = MainWindow()
+    window.set_source_path(first_source)
+    window.records.append(_clip_record(first_source.name, 1))
+    window.set_source_path(second_source)
+    window.records.append(_clip_record(second_source.name, 2))
+    window.output_dir = tmp_path / "output"
+    captured_requests = []
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
+    )
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffprobe", lambda _value: "ffprobe"
+    )
+    monkeypatch.setattr(
+        "video_labeler.export_worker.run_clip_export",
+        lambda request, control: (
+            captured_requests.append(request)
+            or ExportResult(status="ok", output=request.output_path.name)
+        ),
+    )
+
+    window.start_project_export()
+    _wait_for_export_completion(qt_app, window)
+
+    assert window.project_export_button.text() == "导出整个项目"
+    assert window.project_queue_dialog.table.rowCount() == 2
+    assert window.project_queue_dialog.progress_bar.maximum() == 2
+    assert window.project_queue_dialog.table.item(0, 3).text() == "成功"
+    assert not window.project_queue_dialog.cancel_button.isEnabled()
+    assert {request.input_path for request in captured_requests} == {
+        first_source,
+        second_source,
+    }
+
+
+def test_empty_project_shows_quick_start_hint(qt_app, tmp_path):
+    window = MainWindow()
+
+    assert not window.welcome_hint_label.isHidden()
+    window.set_source_path(tmp_path / "source.mp4")
+
+    assert window.welcome_hint_label.isHidden()
+
+
 def test_export_with_unchanged_record_state_keeps_saved_project_clean(
     qt_app, tmp_path, monkeypatch
 ):

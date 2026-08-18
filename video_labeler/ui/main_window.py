@@ -66,7 +66,13 @@ from PySide6.QtWidgets import (
 
 from ..csv_io import read_clip_csv, write_clip_csv
 from ..export_worker import ExportSummary, ExportWorker
-from ..ffmpeg_service import format_seconds, resolve_ffmpeg, resolve_ffprobe
+from ..ffmpeg_service import (
+    cleanup_orphaned_temporary_outputs,
+    find_orphaned_temporary_outputs,
+    format_seconds,
+    resolve_ffmpeg,
+    resolve_ffprobe,
+)
 from ..history import SegmentHistory
 from ..models import (
     BEHAVIOR_LABELS,
@@ -331,6 +337,54 @@ class BehaviorTagComboBox(QComboBox):
         )
 
 
+class ProjectExportQueueDialog(QDialog):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("全工程导出队列")
+        self.resize(900, 420)
+        layout = QVBoxLayout(self)
+        controls = QHBoxLayout()
+        self.progress_bar = QProgressBar()
+        self.cancel_button = QPushButton("取消全部")
+        self.cancel_button.setEnabled(False)
+        controls.addWidget(self.progress_bar, stretch=1)
+        controls.addWidget(self.cancel_button)
+        layout.addLayout(controls)
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ("编号", "视频源", "输出文件", "状态", "错误")
+        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        layout.addWidget(self.table)
+
+    def set_items(self, items: Sequence[tuple[Path, ClipRecord]]) -> None:
+        self.table.setRowCount(len(items))
+        for index, (source_path, record) in enumerate(items):
+            self.table.setItem(index, 0, QTableWidgetItem(str(index + 1)))
+            self.table.setItem(index, 1, QTableWidgetItem(source_path.name))
+            self.table.setItem(index, 2, QTableWidgetItem(record.output))
+            self.update_item(index, record)
+        self.set_progress(0, len(items))
+
+    def update_item(self, index: int, record: ClipRecord) -> None:
+        self.table.setItem(
+            index,
+            3,
+            QTableWidgetItem(STATUS_LABELS.get(record.status, record.status)),
+        )
+        self.table.setItem(index, 4, QTableWidgetItem(record.error))
+
+    def set_progress(self, completed: int, total: int) -> None:
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(completed)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -350,6 +404,8 @@ class MainWindow(QMainWindow):
         self._export_worker: ExportWorker | None = None
         self._export_records: list[ClipRecord] = []
         self._export_record_states: list[tuple[str, str]] = []
+        self._project_export_queue: list[tuple[Path, ClipRecord]] = []
+        self._is_project_export = False
         self._last_playback_rate = 1.0
         self._button_hover_effects: dict[
             QPushButton, QGraphicsDropShadowEffect
@@ -365,10 +421,13 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
 
         self._build_ui()
+        self.project_queue_dialog = ProjectExportQueueDialog(self)
+        self.project_queue_dialog.cancel_button.clicked.connect(self.cancel_export)
         self._build_project_menu()
         self._connect_signals()
         self._update_filename_preview()
         self._update_history_controls()
+        self._update_welcome_hint()
 
     def _build_ui(self) -> None:
         self.workspace_content = QWidget()
@@ -464,6 +523,8 @@ class MainWindow(QMainWindow):
             self.save_csv_button,
             self.output_folder_button,
             self.export_button,
+            self.project_export_button,
+            self.project_queue_button,
             self.shortcut_help_button,
             self.play_button,
             self.seek_back_button,
@@ -518,6 +579,8 @@ class MainWindow(QMainWindow):
         self.output_folder_button = QPushButton("选择输出文件夹")
         self.export_button = QPushButton("批量导出")
         self.export_button.setObjectName("primaryButton")
+        self.project_export_button = QPushButton("导出整个项目")
+        self.project_queue_button = QPushButton("查看导出队列")
         self.shortcut_help_button = QPushButton("快捷键说明")
         self.output_folder_label = QLabel("未选择输出文件夹")
         self.output_folder_label.setTextInteractionFlags(
@@ -592,6 +655,8 @@ class MainWindow(QMainWindow):
         export_output_actions_layout.addWidget(self.output_folder_button)
         export_output_actions_layout.addWidget(self.output_folder_label, stretch=1)
         export_output_actions_layout.addWidget(self.export_button)
+        export_output_actions_layout.addWidget(self.project_export_button)
+        export_output_actions_layout.addWidget(self.project_queue_button)
         action_layout.addWidget(self.export_output_action_group, stretch=1)
 
         separator = QFrame()
@@ -608,6 +673,12 @@ class MainWindow(QMainWindow):
         self.csv_action_group = self.import_csv_action_group
         self.export_action_group = self.export_output_action_group
         self.settings_action_group = self.settings_operation_action_group
+        self.welcome_hint_label = QLabel(
+            "开始使用：导入视频，设置片段范围和标签，再选择输出文件夹导出。"
+        )
+        self.welcome_hint_label.setObjectName("mutedLabel")
+        self.welcome_hint_label.setWordWrap(True)
+        layout.addWidget(self.welcome_hint_label)
         layout.addLayout(action_layout)
 
         metadata_layout = QHBoxLayout()
@@ -1429,6 +1500,8 @@ class MainWindow(QMainWindow):
         self.task_table.cellChanged.connect(self._table_cell_changed)
 
         self.export_button.clicked.connect(self.start_export)
+        self.project_export_button.clicked.connect(self.start_project_export)
+        self.project_queue_button.clicked.connect(self.show_project_export_queue)
         self.cancel_export_button.clicked.connect(self.cancel_export)
         self.shortcut_help_button.clicked.connect(self.show_shortcut_help)
         self._register_shortcuts()
@@ -1492,6 +1565,7 @@ class MainWindow(QMainWindow):
         self._sync_project_video_combo()
         self._refresh_table()
         self._update_history_controls()
+        self._update_welcome_hint()
 
     def _active_project_video(self) -> ProjectVideo | None:
         active_id = self.project.active_video_id
@@ -1558,6 +1632,9 @@ class MainWindow(QMainWindow):
         settings["output_dir"] = str(self.output_dir) if self.output_dir else ""
         return self.project
 
+    def _update_welcome_hint(self) -> None:
+        self.welcome_hint_label.setHidden(bool(self.project.videos))
+
     def _mark_project_dirty(self) -> None:
         self._project_dirty = True
         self._schedule_project_backup()
@@ -1572,7 +1649,7 @@ class MainWindow(QMainWindow):
         try:
             create_backup(self._project_path, self._project_snapshot())
         except (OSError, ValueError) as error:
-            self._set_status(f"自动备份失败：{error}")
+            self._set_status(f"自动备份失败：{self._file_error_tip(error)}")
 
     def _confirm_discard_dirty_project(self) -> bool:
         if not self._project_dirty:
@@ -1599,6 +1676,7 @@ class MainWindow(QMainWindow):
         self.player.setSource(QUrl())
         self._refresh_table()
         self.clear_editor()
+        self._update_welcome_hint()
 
     def new_project(self) -> None:
         if not self._confirm_discard_dirty_project():
@@ -1628,7 +1706,9 @@ class MainWindow(QMainWindow):
                 project_path, self._project_snapshot()
             )
         except (OSError, ValueError) as error:
-            self._show_error("无法保存工程", f"保存工程失败：{error}")
+            self._show_error(
+                "无法保存工程", f"保存工程失败：{self._file_error_tip(error)}"
+            )
             return
         self._project_dirty = False
         self._set_status(f"已保存工程：{self._project_path}")
@@ -1672,7 +1752,9 @@ class MainWindow(QMainWindow):
         try:
             project = load_project(path)
         except (OSError, ValueError) as error:
-            self._show_error("无法打开工程", f"打开工程失败：{error}")
+            self._show_error(
+                "无法打开工程", f"打开工程失败：{self._file_error_tip(error)}"
+            )
             return False
 
         self._backup_timer.stop()
@@ -1697,6 +1779,7 @@ class MainWindow(QMainWindow):
             str(self.output_dir) if self.output_dir else "未选择输出文件夹"
         )
         self._set_output_folder_display()
+        self._cleanup_orphaned_export_parts(prompt=True)
 
         entry = self._active_project_video()
         if entry is None:
@@ -1711,6 +1794,7 @@ class MainWindow(QMainWindow):
             self.switch_active_video(entry.id)
         self._project_dirty = False
         self._backup_timer.stop()
+        self._update_welcome_hint()
         self._set_status(f"已打开工程：{path.name}")
         return True
 
@@ -1858,7 +1942,9 @@ class MainWindow(QMainWindow):
         try:
             write_clip_csv(Path(filename), self.records)
         except OSError as error:
-            self._show_error("无法保存 CSV", f"保存 CSV 失败：{error}")
+            self._show_error(
+                "无法保存 CSV", f"保存 CSV 失败：{self._file_error_tip(error)}"
+            )
             return
         self._set_status(f"已保存 CSV：{filename}")
 
@@ -1876,6 +1962,7 @@ class MainWindow(QMainWindow):
             return
         self.output_dir = Path(directory)
         self._set_output_folder_display()
+        self._cleanup_orphaned_export_parts(prompt=True)
         self._mark_project_dirty()
         self._set_status(f"输出文件夹：{self.output_dir}")
 
@@ -2571,12 +2658,42 @@ class MainWindow(QMainWindow):
         self._set_status(f"已更新片段 {row + 1} 的输出文件名")
 
     def start_export(self) -> None:
-        if self._export_worker is not None and self._export_worker.isRunning():
-            return
         if self.source_path is None or not self.source_path.is_file():
             self._show_error("没有视频源", "导出前请先导入源视频。")
             return
-        if not self.records:
+        self._start_export(self.records, [self.source_path] * len(self.records))
+
+    def start_project_export(self) -> None:
+        records: list[ClipRecord] = []
+        input_paths: list[Path] = []
+        missing_sources = []
+        for video in self.project.videos:
+            if not video.segments:
+                continue
+            if not video.path.is_file():
+                missing_sources.append(str(video.path))
+                continue
+            records.extend(video.segments)
+            input_paths.extend([video.path] * len(video.segments))
+
+        if missing_sources:
+            self._show_error(
+                "视频源不存在",
+                "以下视频源不存在：" + "；".join(missing_sources),
+            )
+            return
+        self._start_export(records, input_paths, project_queue=True)
+
+    def _start_export(
+        self,
+        records: Sequence[ClipRecord],
+        input_paths: Sequence[Path],
+        *,
+        project_queue: bool = False,
+    ) -> None:
+        if self._export_worker is not None and self._export_worker.isRunning():
+            return
+        if not records:
             self._show_error("没有片段任务", "导出前请至少添加一个片段。")
             return
         if self.output_dir is None:
@@ -2589,18 +2706,21 @@ class MainWindow(QMainWindow):
             self.output_dir.mkdir(parents=True, exist_ok=True)
             if not self.output_dir.is_dir():
                 raise OSError("输出路径不是文件夹")
-            outputs = [record.output.lower() for record in self.records]
+            outputs = [record.output.lower() for record in records]
             if len(outputs) != len(set(outputs)):
                 raise ValueError("任务列表中包含重复的输出文件名。")
-            for record in self.records:
+            for record in records:
                 validate_output_filename(record.output)
         except (OSError, RuntimeError, ValueError) as error:
-            self._show_error("无法开始导出", f"开始导出失败：{error}")
+            self._show_error(
+                "无法开始导出", f"开始导出失败：{self._file_error_tip(error)}"
+            )
             return
 
         self._export_worker = ExportWorker(
-            records=self.records,
-            input_path=self.source_path,
+            records=records,
+            input_path=input_paths[0],
+            input_paths=input_paths,
             output_dir=self.output_dir,
             ffmpeg=ffmpeg,
             ffprobe=ffprobe,
@@ -2608,16 +2728,23 @@ class MainWindow(QMainWindow):
             overwrite=self.overwrite_check.isChecked(),
             workers=self.workers_spin.value(),
         )
-        self._export_records = list(self.records)
+        self._export_records = list(records)
         self._export_record_states = [
             (record.status, record.error) for record in self._export_records
         ]
+        self._is_project_export = project_queue
+        if project_queue:
+            self._project_export_queue = list(zip(input_paths, records))
+            self.project_queue_dialog.set_items(self._project_export_queue)
+            self.project_queue_dialog.cancel_button.setEnabled(True)
+            self.show_project_export_queue()
         self._export_worker.clip_finished.connect(self._export_clip_finished)
         self._export_worker.progress.connect(self._export_progress)
         self._export_worker.export_completed.connect(self._export_completed)
-        self.progress_bar.setRange(0, len(self.records))
+        self.progress_bar.setRange(0, len(records))
         self.progress_bar.setValue(0)
         self.export_button.setEnabled(False)
+        self.project_export_button.setEnabled(False)
         self.cancel_export_button.setEnabled(True)
         self._set_status("正在导出片段……")
         self._export_worker.start()
@@ -2626,6 +2753,7 @@ class MainWindow(QMainWindow):
         if self._export_worker is not None:
             self._export_worker.cancel()
             self.cancel_export_button.setEnabled(False)
+            self.project_queue_dialog.cancel_button.setEnabled(False)
             self._set_status("已请求取消，正在完成当前 FFmpeg 任务……")
 
     def _export_clip_finished(self, _index: int, _result: object) -> None:
@@ -2633,6 +2761,8 @@ class MainWindow(QMainWindow):
         if not 0 <= _index < len(self._export_records):
             return
         record = self._export_records[_index]
+        if self._is_project_export:
+            self.project_queue_dialog.update_item(_index, record)
         record_state = (record.status, record.error)
         if (
             self._project_path is not None
@@ -2644,14 +2774,19 @@ class MainWindow(QMainWindow):
     def _export_progress(self, completed: int, total: int) -> None:
         self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(completed)
+        if self._is_project_export:
+            self.project_queue_dialog.set_progress(completed, total)
 
     def _export_completed(self, summary: ExportSummary) -> None:
         self._refresh_table()
         self.export_button.setEnabled(True)
+        self.project_export_button.setEnabled(True)
         self.cancel_export_button.setEnabled(False)
+        self.project_queue_dialog.cancel_button.setEnabled(False)
         self._export_worker = None
         self._export_records = []
         self._export_record_states = []
+        self._is_project_export = False
         self._set_status(
             "导出完成："
             f"成功={summary.success} 跳过={summary.skipped} "
@@ -2664,6 +2799,44 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
+
+    @staticmethod
+    def _file_error_tip(error: Exception) -> str:
+        if isinstance(error, PermissionError):
+            return "访问被拒绝。请检查文件夹写入权限，并关闭占用文件后重试。"
+        return str(error)
+
+    def show_project_export_queue(self) -> None:
+        self.project_queue_dialog.show()
+        self.project_queue_dialog.raise_()
+        self.project_queue_dialog.activateWindow()
+
+    def _cleanup_orphaned_export_parts(self, *, prompt: bool) -> None:
+        if self.output_dir is None:
+            return
+        try:
+            orphaned = find_orphaned_temporary_outputs(self.output_dir)
+        except OSError as error:
+            self._set_status(
+                f"检查导出临时文件失败：{self._file_error_tip(error)}"
+            )
+            return
+        if not orphaned:
+            return
+        if prompt and QMessageBox.question(
+            self,
+            "发现导出临时文件",
+            f"发现 {len(orphaned)} 个上次导出残留的临时文件，是否清理？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            cleanup_orphaned_temporary_outputs(self.output_dir)
+        except OSError as error:
+            self._set_status(
+                f"清理导出临时文件失败：{self._file_error_tip(error)}"
+            )
 
     def closeEvent(self, event) -> None:
         if self._confirm_discard_dirty_project():

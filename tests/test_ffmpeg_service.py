@@ -16,10 +16,18 @@ except ImportError:
     parse_time_to_seconds = None
 
 try:
-    from video_labeler.ffmpeg_service import ExportControl, temporary_output_path
+    from video_labeler.ffmpeg_service import (
+        ExportControl,
+        temporary_output_path,
+    )
 except ImportError:
     ExportControl = None
     temporary_output_path = None
+
+try:
+    from video_labeler.ffmpeg_service import cleanup_orphaned_temporary_outputs
+except ImportError:
+    cleanup_orphaned_temporary_outputs = None
 
 try:
     from video_labeler.ffmpeg_service import ExportRequest, run_clip_export
@@ -139,6 +147,55 @@ def test_temporary_output_path_is_unique_and_keeps_the_media_suffix(tmp_path):
     assert first != second
     assert first.name.endswith(".part.mp4")
     assert second.name.endswith(".part.mp4")
+
+
+def test_cleanup_orphaned_temporary_outputs_only_removes_our_uuid_parts(tmp_path):
+    assert cleanup_orphaned_temporary_outputs is not None
+    orphan = tmp_path / ("clip." + "a" * 32 + ".part.mp4")
+    user_media = tmp_path / "family.part.mp4"
+    nested_orphan = tmp_path / "nested" / ("clip." + "b" * 32 + ".part.mp4")
+    orphan.write_bytes(b"partial")
+    user_media.write_bytes(b"user media")
+    nested_orphan.parent.mkdir()
+    nested_orphan.write_bytes(b"partial")
+
+    removed = cleanup_orphaned_temporary_outputs(tmp_path)
+
+    assert removed == [orphan]
+    assert not orphan.exists()
+    assert user_media.exists()
+    assert nested_orphan.exists()
+
+
+def test_run_clip_export_reports_a_permission_tip(tmp_path, monkeypatch):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "locked" / "clip.mp4"
+    path_type = type(tmp_path)
+    original_mkdir = path_type.mkdir
+
+    def deny_output_directory(path, *args, **kwargs):
+        if path == output.parent:
+            raise PermissionError("access denied")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "mkdir", deny_output_directory)
+
+    result = run_clip_export(
+        ExportRequest(
+            ffmpeg="ffmpeg.exe",
+            ffprobe="ffprobe.exe",
+            input_path=source,
+            output_path=output,
+            start="00:00:00.000",
+            end="00:00:01.000",
+            mode="encode",
+            overwrite=False,
+        )
+    )
+
+    assert result.status == "fail"
+    assert "访问被拒绝" in result.error
 
 
 def test_run_clip_export_publishes_only_after_media_validation(tmp_path, monkeypatch):
