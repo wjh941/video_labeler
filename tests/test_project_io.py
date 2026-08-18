@@ -81,6 +81,46 @@ def test_save_normalizes_extension_without_changing_existing_backup_filename(tmp
     assert backup_path.is_file()
 
 
+def test_save_project_uses_a_unique_hidden_temporary_path(tmp_path, monkeypatch):
+    from video_labeler.project_io import new_project, save_project
+
+    temporary_paths = []
+    original_write_text = type(tmp_path).write_text
+
+    def capture_write_text(path, *args, **kwargs):
+        temporary_paths.append(path)
+        return original_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(tmp_path), "write_text", capture_write_text)
+
+    save_project(tmp_path / "shift.labelproj", new_project())
+
+    assert len(temporary_paths) == 1
+    assert temporary_paths[0].name.startswith(".shift.labelproj.")
+    assert temporary_paths[0].suffix == ".tmp"
+
+
+def test_save_project_cleans_temporary_file_after_a_failed_publish(tmp_path, monkeypatch):
+    from video_labeler.project_io import new_project, save_project
+
+    target = tmp_path / "shift.labelproj"
+    target.write_text('{"saved":"version"}', encoding="utf-8")
+    original_replace = type(tmp_path).replace
+
+    def fail_temporary_publish(source, destination):
+        if source.suffix == ".tmp":
+            raise OSError("simulated publish failure")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(type(tmp_path), "replace", fail_temporary_publish)
+
+    with pytest.raises(OSError, match="simulated publish failure"):
+        save_project(target, new_project())
+
+    assert target.read_text(encoding="utf-8") == '{"saved":"version"}'
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_create_backup_keeps_ten_newest_files(tmp_path):
     from video_labeler.project_io import create_backup, new_project, save_project
 

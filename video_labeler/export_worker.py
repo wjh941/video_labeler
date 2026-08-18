@@ -1,5 +1,4 @@
 import csv
-import os
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -8,7 +7,13 @@ from typing import Iterable, Sequence
 
 from PySide6.QtCore import QThread, Signal
 
-from .ffmpeg_service import ExportRequest, ExportResult, format_seconds, run_clip_export
+from .ffmpeg_service import (
+    ExportControl,
+    ExportRequest,
+    ExportResult,
+    format_seconds,
+    run_clip_export,
+)
 from .models import ClipRecord
 
 
@@ -61,6 +66,7 @@ class ExportWorker(QThread):
         input_path: Path,
         output_dir: Path,
         ffmpeg: str,
+        ffprobe: str,
         mode: str,
         overwrite: bool,
         workers: int = 0,
@@ -70,13 +76,16 @@ class ExportWorker(QThread):
         self._input_path = input_path
         self._output_dir = output_dir
         self._ffmpeg = ffmpeg
+        self._ffprobe = ffprobe
         self._mode = mode
         self._overwrite = overwrite
-        self._workers = workers or (os.cpu_count() or 4)
-        self._cancel_requested = threading.Event()
+        self._workers = workers or 2
+        self._control = ExportControl()
+        self._submission_lock = threading.Lock()
 
     def cancel(self) -> None:
-        self._cancel_requested.set()
+        with self._submission_lock:
+            self._control.cancel()
 
     def run(self) -> None:
         self._output_dir.mkdir(parents=True, exist_ok=True)
@@ -89,22 +98,27 @@ class ExportWorker(QThread):
         def submit_available(executor: ThreadPoolExecutor) -> None:
             nonlocal next_index
             while (
-                not self._cancel_requested.is_set()
-                and next_index < total
+                next_index < total
                 and len(futures) < self._workers
             ):
-                record = self._records[next_index]
-                request = ExportRequest(
-                    ffmpeg=self._ffmpeg,
-                    input_path=self._input_path,
-                    output_path=self._output_dir / record.output,
-                    start=format_seconds(record.start_seconds),
-                    end=format_seconds(record.end_seconds),
-                    mode=self._mode,
-                    overwrite=self._overwrite,
-                )
-                futures[executor.submit(run_clip_export, request)] = next_index
-                next_index += 1
+                with self._submission_lock:
+                    if self._control.is_canceled():
+                        return
+                    record = self._records[next_index]
+                    request = ExportRequest(
+                        ffmpeg=self._ffmpeg,
+                        ffprobe=self._ffprobe,
+                        input_path=self._input_path,
+                        output_path=self._output_dir / record.output,
+                        start=format_seconds(record.start_seconds),
+                        end=format_seconds(record.end_seconds),
+                        mode=self._mode,
+                        overwrite=self._overwrite,
+                    )
+                    futures[executor.submit(run_clip_export, request, self._control)] = (
+                        next_index
+                    )
+                    next_index += 1
 
         with ThreadPoolExecutor(max_workers=self._workers) as executor:
             submit_available(executor)

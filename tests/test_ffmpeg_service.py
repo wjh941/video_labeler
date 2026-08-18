@@ -1,4 +1,8 @@
 from pathlib import Path
+import subprocess
+import threading
+
+import pytest
 
 try:
     from video_labeler.ffmpeg_service import (
@@ -10,6 +14,12 @@ except ImportError:
     build_command = None
     format_seconds = None
     parse_time_to_seconds = None
+
+try:
+    from video_labeler.ffmpeg_service import ExportControl, temporary_output_path
+except ImportError:
+    ExportControl = None
+    temporary_output_path = None
 
 try:
     from video_labeler.ffmpeg_service import ExportRequest, run_clip_export
@@ -69,6 +79,16 @@ def test_time_conversion_round_trips_millisecond_precision():
     assert format_seconds(3723.25) == "01:02:03.250"
 
 
+@pytest.mark.parametrize("invalid_time", ("nan", "inf", "-inf"))
+def test_time_conversion_rejects_nonfinite_values(invalid_time):
+    _require_ffmpeg_api()
+
+    with pytest.raises(ValueError, match="finite"):
+        parse_time_to_seconds(invalid_time)
+    with pytest.raises(ValueError, match="finite"):
+        format_seconds(float(invalid_time))
+
+
 def test_encode_command_rejects_an_end_time_before_start_time(tmp_path):
     _require_ffmpeg_api()
 
@@ -94,6 +114,7 @@ def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
     output_path.write_bytes(b"x" * 1024)
     request = ExportRequest(
         ffmpeg="ffmpeg.exe",
+        ffprobe="ffprobe.exe",
         input_path=tmp_path / "source.mp4",
         output_path=output_path,
         start="00:00:02.000",
@@ -106,3 +127,129 @@ def test_run_clip_export_skips_an_existing_valid_output(tmp_path):
 
     assert result.status == "skip"
     assert result.output == output_path.name
+
+
+def test_temporary_output_path_is_unique_and_keeps_the_media_suffix(tmp_path):
+    assert temporary_output_path is not None, "temporary output API is not implemented"
+    output = tmp_path / "clip.mp4"
+
+    first = temporary_output_path(output)
+    second = temporary_output_path(output)
+
+    assert first != second
+    assert first.name.endswith(".part.mp4")
+    assert second.name.endswith(".part.mp4")
+
+
+def test_run_clip_export_publishes_only_after_media_validation(tmp_path, monkeypatch):
+    assert run_clip_export is not None, "clip export execution API is not implemented"
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "clip.mp4"
+
+    class SuccessfulPopen:
+        def __init__(self, command, **kwargs):
+            self.temporary_path = Path(command[-1])
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            self.temporary_path.write_bytes(b"x" * 2048)
+            self.returncode = 0
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", SuccessfulPopen)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args,
+            0,
+            '{"format":{"duration":"2.0"},"streams":[{"codec_type":"video"}]}',
+            "",
+        ),
+    )
+
+    result = run_clip_export(
+        ExportRequest(
+            ffmpeg="ffmpeg.exe",
+            ffprobe="ffprobe.exe",
+            input_path=source,
+            output_path=output,
+            start="00:00:02.000",
+            end="00:00:04.000",
+            mode="encode",
+            overwrite=False,
+        )
+    )
+
+    assert result.status == "ok"
+    assert output.read_bytes() == b"x" * 2048
+    assert not list(tmp_path.glob("clip.*.part.mp4"))
+
+
+def test_run_clip_export_cancellation_leaves_no_published_output(tmp_path, monkeypatch):
+    assert ExportControl is not None, "export control API is not implemented"
+    assert run_clip_export is not None, "clip export execution API is not implemented"
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "clip.mp4"
+    started = threading.Event()
+    processes = []
+
+    class HangingPopen:
+        def __init__(self, command, **kwargs):
+            self.command = command
+            self.temporary_path = Path(command[-1])
+            self.returncode = None
+            self.terminated = False
+
+        def communicate(self, timeout=None):
+            self.temporary_path.write_bytes(b"x" * 2048)
+            started.set()
+            raise subprocess.TimeoutExpired(self.command, timeout)
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            self.returncode = -15
+            return self.returncode
+
+    def start_process(*args, **kwargs):
+        process = HangingPopen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", start_process)
+    control = ExportControl()
+    request = ExportRequest(
+        ffmpeg="ffmpeg.exe",
+        ffprobe="ffprobe.exe",
+        input_path=source,
+        output_path=output,
+        start="00:00:02.000",
+        end="00:00:04.000",
+        mode="encode",
+        overwrite=False,
+    )
+    results = []
+    thread = threading.Thread(
+        target=lambda: results.append(run_clip_export(request, control))
+    )
+
+    thread.start()
+    assert started.wait(timeout=1)
+    control.cancel()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert results[0].status == "canceled"
+    assert processes[0].terminated
+    assert not output.exists()
+    assert not list(tmp_path.glob("clip.*.part.mp4"))

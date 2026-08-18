@@ -635,8 +635,11 @@ def test_export_status_change_marks_saved_project_dirty_and_persists(
         "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
     )
     monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffprobe", lambda _value: "ffprobe"
+    )
+    monkeypatch.setattr(
         "video_labeler.export_worker.run_clip_export",
-        lambda request: ExportResult(
+        lambda request, control: ExportResult(
             status="fail", output=request.output_path.name, error="simulated failure"
         ),
     )
@@ -657,6 +660,35 @@ def test_export_status_change_marks_saved_project_dirty_and_persists(
     assert restored.records[0].error == "simulated failure"
 
 
+def test_export_passes_resolved_ffprobe_to_each_clip(qt_app, tmp_path, monkeypatch):
+    source_path = tmp_path / "source.mp4"
+    source_path.touch()
+    window = MainWindow()
+    window.set_source_path(source_path)
+    window.records.append(_clip_record(source_path.name, 1))
+    window.output_dir = tmp_path / "output"
+    captured_requests = []
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
+    )
+    monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffprobe", lambda _value: "ffprobe"
+    )
+    monkeypatch.setattr(
+        "video_labeler.export_worker.run_clip_export",
+        lambda request, control=None: (
+            captured_requests.append((request, control))
+            or ExportResult(status="ok", output=request.output_path.name)
+        ),
+    )
+
+    window.start_export()
+    _wait_for_export_completion(qt_app, window)
+
+    assert captured_requests[0][0].ffprobe == "ffprobe"
+    assert captured_requests[0][1] is not None
+
+
 def test_export_with_unchanged_record_state_keeps_saved_project_clean(
     qt_app, tmp_path, monkeypatch
 ):
@@ -675,8 +707,13 @@ def test_export_with_unchanged_record_state_keeps_saved_project_clean(
         "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
     )
     monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffprobe", lambda _value: "ffprobe"
+    )
+    monkeypatch.setattr(
         "video_labeler.export_worker.run_clip_export",
-        lambda request: ExportResult(status="skip", output=request.output_path.name),
+        lambda request, control: ExportResult(
+            status="skip", output=request.output_path.name
+        ),
     )
 
     window.start_export()
@@ -702,8 +739,13 @@ def test_export_status_change_without_saved_project_keeps_project_clean(
         "video_labeler.ui.main_window.resolve_ffmpeg", lambda _value: "ffmpeg"
     )
     monkeypatch.setattr(
+        "video_labeler.ui.main_window.resolve_ffprobe", lambda _value: "ffprobe"
+    )
+    monkeypatch.setattr(
         "video_labeler.export_worker.run_clip_export",
-        lambda request: ExportResult(status="ok", output=request.output_path.name),
+        lambda request, control: ExportResult(
+            status="ok", output=request.output_path.name
+        ),
     )
 
     window.start_export()

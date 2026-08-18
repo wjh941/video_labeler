@@ -114,3 +114,20 @@ def test_read_clip_csv_rejects_missing_required_headers(tmp_path):
 
     with pytest.raises(ValueError, match="missing columns"):
         read_clip_csv(csv_path)
+
+
+@pytest.mark.parametrize("invalid_time", ("nan", "inf", "-inf"))
+def test_read_clip_csv_rejects_nonfinite_times(tmp_path, invalid_time):
+    _require_csv_api()
+    csv_path = tmp_path / "invalid-time.csv"
+    csv_path.write_text(
+        (
+            "source,start,end,output\n"
+            f"cam02.mp4,{invalid_time},00:00:04.000,"
+            "20260729-cam02_panorama-dog_out-pos-daytime-001.mp4\n"
+        ),
+        encoding="utf-8-sig",
+    )
+
+    with pytest.raises(ValueError, match="finite"):
+        read_clip_csv(csv_path)

@@ -1,4 +1,5 @@
 import csv
+import math
 from pathlib import Path
 from typing import Sequence
 
@@ -14,19 +15,23 @@ def _parse_seconds(value: str) -> float:
     if not text:
         raise ValueError("empty time")
     if ":" not in text:
-        return float(text)
+        seconds = float(text)
+    else:
+        parts = text.split(":")
+        if len(parts) > 3:
+            raise ValueError(f"invalid time: {value}")
 
-    parts = text.split(":")
-    if len(parts) > 3:
-        raise ValueError(f"invalid time: {value}")
-
-    seconds = 0.0
-    for part in parts:
-        seconds = seconds * 60 + float(part)
+        seconds = 0.0
+        for part in parts:
+            seconds = seconds * 60 + float(part)
+    if not math.isfinite(seconds):
+        raise ValueError("time must be finite")
     return seconds
 
 
 def _format_seconds(value: float) -> str:
+    if not math.isfinite(value):
+        raise ValueError("time must be finite")
     if value < 0:
         raise ValueError("time cannot be negative")
 

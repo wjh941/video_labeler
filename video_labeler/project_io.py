@@ -98,10 +98,13 @@ def project_from_dict(document: Any) -> LabelProject:
 def save_project(path: Path, project: LabelProject) -> Path:
     target = _project_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f"{target.name}.tmp")
+    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
     serialized = json.dumps(project_to_dict(project), ensure_ascii=False, indent=2)
-    temporary.write_text(serialized, encoding="utf-8")
-    temporary.replace(target)
+    try:
+        temporary.write_text(serialized, encoding="utf-8")
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
     return target
 
 
