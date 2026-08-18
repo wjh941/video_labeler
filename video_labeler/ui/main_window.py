@@ -1754,6 +1754,8 @@ class MainWindow(QMainWindow):
         self._refresh_table()
         self._update_history_controls()
         self._update_welcome_hint()
+        if self.records:
+            self.project_header.setChecked(False)
 
     def _active_project_video(self) -> ProjectVideo | None:
         active_id = self.project.active_video_id
@@ -2635,7 +2637,8 @@ class MainWindow(QMainWindow):
             sequence=sequence,
         )
         before = list(self.records)
-        if self._editing_index is None:
+        is_new_record = self._editing_index is None
+        if is_new_record:
             self.records.append(record)
             self._set_status(f"已添加片段 {sequence:03d}")
         else:
@@ -2646,6 +2649,8 @@ class MainWindow(QMainWindow):
         if history is not None:
             history.push(before, self.records)
         self._refresh_table()
+        if is_new_record and not before:
+            self.project_header.setChecked(False)
         self._mark_project_dirty()
         self._prepare_next_clip(record.end_seconds)
         self._update_history_controls()
@@ -2927,6 +2932,7 @@ class MainWindow(QMainWindow):
         self._apply_table_filters()
 
     def _sort_records(self) -> None:
+        before = list(self.records)
         self.task_table.clearSelection()
         key_name, reverse = self.sort_combo.currentData()
         if key_name == "duration":
@@ -2938,7 +2944,10 @@ class MainWindow(QMainWindow):
             self.records.sort(key=lambda record: record.sequence, reverse=reverse)
         self._editing_index = None
         self._refresh_table()
-        self._clear_active_history()
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self._update_history_controls()
 
     @staticmethod
     def _apply_status_color(item: QTableWidgetItem, status: str) -> None:
@@ -3004,6 +3013,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         if behavior_mode not in {"replace", "add", "remove"}:
             raise ValueError("行为标签批量操作无效")
+        before = list(self.records)
         selected_indexes = set(indexes)
         proposed: dict[int, ClipRecord] = {}
         skipped_manual_view = False
@@ -3068,7 +3078,10 @@ class MainWindow(QMainWindow):
         self._editing_index = None
         self._refresh_table()
         self._mark_project_dirty()
-        self._clear_active_history()
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self._update_history_controls()
         if skipped_manual_view:
             self._set_status("批量修改完成；手动命名片段未更新视角")
         else:

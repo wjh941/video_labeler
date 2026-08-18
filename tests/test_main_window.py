@@ -1512,7 +1512,7 @@ def test_undo_does_not_change_verified_next_clip_reset_fields(qt_app, tmp_path):
     assert window.lighting_combo.currentText() == "night_full_color"
 
 
-def test_batch_edit_does_not_become_a_segment_history_operation(qt_app, tmp_path):
+def test_batch_edit_is_undoable_as_one_segment_history_operation(qt_app, tmp_path):
     window = MainWindow()
     window.set_source_path(tmp_path / "source.mp4")
     _add_valid_clip(window, start=1, end=2, behavior="dog_out")
@@ -1527,8 +1527,37 @@ def test_batch_edit_does_not_become_a_segment_history_operation(qt_app, tmp_path
     )
 
     assert window.records[0].behaviors == ("fall",)
-    assert not window.undo_button.isEnabled()
-    assert not window.redo_button.isEnabled()
+    assert window.undo_button.isEnabled()
+    window.undo_segments()
+    assert window.records[0].behaviors == ("dog_out",)
+    assert window.redo_button.isEnabled()
+    window.redo_segments()
+    assert window.records[0].behaviors == ("fall",)
+
+
+def test_sorting_segments_keeps_the_previous_history_entry_undoable(
+    qt_app, tmp_path
+):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+    _add_valid_clip(window, start=2, end=5, behavior="fall")
+
+    window.sort_combo.setCurrentIndex(3)
+
+    assert [record.sequence for record in window.records] == [2, 1]
+    window.undo_segments()
+    assert [record.sequence for record in window.records] == [1, 2]
+
+
+def test_project_setup_collapses_after_the_first_segment_is_added(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    assert window.project_header.isChecked()
+
+    _add_valid_clip(window, start=1, end=2, behavior="dog_out")
+
+    assert not window.project_header.isChecked()
 
 
 def test_main_window_shortcut_mapping(qt_app):
