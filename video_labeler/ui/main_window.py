@@ -33,6 +33,7 @@ from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QDialog,
@@ -47,10 +48,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QProgressBar,
     QScrollArea,
@@ -65,6 +68,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..csv_io import read_clip_csv, write_clip_csv
+from ..dataset_io import write_clip_jsonl, write_clip_yolo
 from ..export_worker import ExportSummary, ExportWorker
 from ..ffmpeg_service import (
     cleanup_orphaned_temporary_outputs,
@@ -73,6 +77,7 @@ from ..ffmpeg_service import (
     resolve_ffmpeg,
     resolve_ffprobe,
 )
+from ..frame_cache import FrameCache
 from ..history import SegmentHistory
 from ..models import (
     BEHAVIOR_LABELS,
@@ -96,10 +101,25 @@ from ..project_io import (
     ProjectVideo,
     add_or_activate_video,
     create_backup,
+    create_version_snapshot,
+    list_version_snapshots,
+    load_export_queue_state,
     load_project,
+    load_tag_preset,
     new_project,
+    restore_version_snapshot,
+    save_export_queue_state,
     save_project as write_label_project,
+    save_tag_preset,
 )
+from ..preannotation_io import PreAnnotation, read_preannotation_json
+from ..preferences_io import (
+    DEFAULT_HOTKEYS,
+    default_preferences_path,
+    load_hotkey_preferences,
+    save_hotkey_preferences,
+)
+from ..segment_timeline import SegmentTimelineSlider
 
 
 TABLE_COLUMNS = (
@@ -135,6 +155,17 @@ SHORTCUT_HELP_ROWS = (
     ("Ctrl+Y", "重做片段操作"),
     ("Ctrl+S", "保存标注工程 (*.labelproj)"),
 )
+HOTKEY_ACTION_LABELS = {
+    "play_pause": "Play or pause",
+    "previous_frame": "Previous frame",
+    "next_frame": "Next frame",
+    "set_start": "Set start",
+    "set_end": "Set end",
+    "delete_selected": "Delete selected segment",
+    "undo": "Undo segment change",
+    "redo": "Redo segment change",
+    "save_project": "Save project",
+}
 
 
 class CollapsibleGroupBox(QGroupBox):
@@ -406,6 +437,11 @@ class MainWindow(QMainWindow):
         self._export_record_states: list[tuple[str, str]] = []
         self._project_export_queue: list[tuple[Path, ClipRecord]] = []
         self._is_project_export = False
+        self.frame_cache = FrameCache(max_bytes=64 * 1024 * 1024)
+        self._hotkey_preferences_path = default_preferences_path()
+        self.hotkey_bindings = load_hotkey_preferences(
+            self._hotkey_preferences_path
+        )
         self._last_playback_rate = 1.0
         self._button_hover_effects: dict[
             QPushButton, QGraphicsDropShadowEffect
@@ -490,6 +526,8 @@ class MainWindow(QMainWindow):
 
         self.page_layout.addWidget(self.workspace_row)
         self.page_layout.addWidget(self.task_panel)
+        self.operation_log_group = self._build_log_panel()
+        self.page_layout.addWidget(self.operation_log_group)
         self.page_layout.addLayout(self._build_export_status())
 
         for card in (
@@ -497,6 +535,7 @@ class MainWindow(QMainWindow):
             self.video_panel,
             self.annotation_panel,
             self.task_panel,
+            self.operation_log_group,
         ):
             self._apply_card_shadow(card)
         self._install_presentation_button_effects()
@@ -732,15 +771,26 @@ class MainWindow(QMainWindow):
 
     def _build_project_menu(self) -> None:
         self.project_menu = self.menuBar().addMenu("工程")
+        self.import_preannotation_action = QAction("导入预标注 JSON", self)
+        self.export_dataset_action = QAction("导出数据集", self)
         self.new_project_action = QAction("新建工程", self)
         self.open_project_action = QAction("打开工程", self)
         self.save_project_action = QAction("保存工程", self)
+        self.save_version_action = QAction("保存版本快照", self)
         self.restore_project_action = QAction("从备份文件恢复工程", self)
+        self.restore_version_action = QAction("从版本快照恢复工程", self)
         self.project_menu.addAction(self.new_project_action)
         self.project_menu.addAction(self.open_project_action)
         self.project_menu.addAction(self.save_project_action)
+        self.project_menu.addAction(self.import_preannotation_action)
+        self.project_menu.addAction(self.export_dataset_action)
         self.project_menu.addSeparator()
+        self.project_menu.addAction(self.save_version_action)
+        self.project_menu.addAction(self.restore_version_action)
         self.project_menu.addAction(self.restore_project_action)
+        self.settings_menu = self.menuBar().addMenu("设置")
+        self.hotkey_settings_action = QAction("配置快捷键", self)
+        self.settings_menu.addAction(self.hotkey_settings_action)
 
     def _build_video_panel(self) -> QGroupBox:
         group = QGroupBox("视频预览")
@@ -767,6 +817,9 @@ class MainWindow(QMainWindow):
         self.video_scene.setBackgroundBrush(QColor("#1F2937"))
         self.video_item = QGraphicsVideoItem()
         self.video_item.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self.video_item.videoSink().videoFrameChanged.connect(
+            self._cache_paused_video_frame
+        )
         self.video_scene.addItem(self.video_item)
         self.video_placeholder_item = self.video_scene.addSimpleText(
             "导入视频后开始标注"
@@ -798,7 +851,7 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(QLabel("播放进度"))
         self.position_label = QLabel("00:00:00.000")
         self.duration_label = QLabel("00:00:00.000")
-        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider = SegmentTimelineSlider()
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.setTracking(False)
         self.timeline_slider.setMinimumHeight(28)
@@ -903,8 +956,6 @@ class MainWindow(QMainWindow):
             time_layout.addWidget(cell)
         layout.addLayout(time_layout)
 
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
         self.add_button = QPushButton("添加片段")
         self.remove_button = QPushButton("删除所选")
         self.undo_button = QPushButton("撤销")
@@ -926,8 +977,19 @@ class MainWindow(QMainWindow):
                 QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Fixed,
             )
-            actions.addWidget(button)
-        layout.addLayout(actions)
+        primary_actions = QHBoxLayout()
+        primary_actions.addWidget(self.add_button)
+        secondary_actions = QHBoxLayout()
+        secondary_actions.setSpacing(8)
+        for button in (
+            self.remove_button,
+            self.undo_button,
+            self.redo_button,
+            self.clear_button,
+        ):
+            secondary_actions.addWidget(button)
+        layout.addLayout(primary_actions)
+        layout.addLayout(secondary_actions)
 
         self.behavior_checks: dict[str, QCheckBox] = {}
         self.behaviors_group = CollapsibleGroupBox("行为标签")
@@ -976,11 +1038,20 @@ class MainWindow(QMainWindow):
         self.remove_custom_behavior_tag_button = QPushButton("删除标签")
         self.remove_custom_behavior_tag_button.setObjectName("dangerButton")
         self.remove_custom_behavior_tag_button.setEnabled(False)
+        self.custom_tag_color_button = QPushButton("设置颜色")
+        self.custom_tag_color_button.setEnabled(False)
         remove_custom_tag_layout.addWidget(self.custom_tag_library_combo, stretch=1)
         remove_custom_tag_layout.addWidget(
             self.remove_custom_behavior_tag_button
         )
+        remove_custom_tag_layout.addWidget(self.custom_tag_color_button)
         custom_tags_layout.addLayout(remove_custom_tag_layout)
+        preset_layout = QHBoxLayout()
+        self.import_tag_preset_button = QPushButton("导入标签预设")
+        self.export_tag_preset_button = QPushButton("导出标签预设")
+        preset_layout.addWidget(self.import_tag_preset_button)
+        preset_layout.addWidget(self.export_tag_preset_button)
+        custom_tags_layout.addLayout(preset_layout)
         custom_tags_group_layout = QVBoxLayout(self.custom_tags_group)
         custom_tags_group_layout.setContentsMargins(6, 6, 6, 6)
         custom_tags_group_layout.addWidget(custom_tags_content)
@@ -1065,6 +1136,9 @@ class MainWindow(QMainWindow):
         for behavior in available_tags:
             checkbox = QCheckBox(behavior)
             checkbox.setChecked(behavior in selected_tags)
+            color = self.project.custom_behavior_tag_colors.get(behavior)
+            if color:
+                checkbox.setStyleSheet(f"QCheckBox {{ color: {color}; }}")
             checkbox.toggled.connect(
                 lambda checked, tag=behavior: self.behavior_tag_combo.set_tag_checked(
                     tag, checked
@@ -1109,6 +1183,9 @@ class MainWindow(QMainWindow):
             else:
                 self.custom_tag_library_combo.addItem("暂无自定义标签", None)
         self.remove_custom_behavior_tag_button.setEnabled(
+            bool(self.project.custom_behavior_tags)
+        )
+        self.custom_tag_color_button.setEnabled(
             bool(self.project.custom_behavior_tags)
         )
 
@@ -1282,6 +1359,35 @@ class MainWindow(QMainWindow):
         if self.task_panel.isChecked():
             self.task_panel_content.setMinimumHeight(280)
 
+    def _build_log_panel(self) -> CollapsibleGroupBox:
+        group = CollapsibleGroupBox("操作日志")
+        group.setObjectName("operationLogPanel")
+        group.setChecked(False)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        self.log_panel = QPlainTextEdit()
+        self.log_panel.setReadOnly(True)
+        self.log_panel.setMinimumHeight(130)
+        self.log_panel.document().setMaximumBlockCount(1000)
+        layout.addWidget(self.log_panel)
+
+        controls = QHBoxLayout()
+        controls.addStretch(1)
+        self.copy_log_button = QPushButton("复制日志")
+        self.clear_log_button = QPushButton("清空日志")
+        controls.addWidget(self.copy_log_button)
+        controls.addWidget(self.clear_log_button)
+        layout.addLayout(controls)
+
+        group_layout = QVBoxLayout(group)
+        group_layout.setContentsMargins(6, 6, 6, 6)
+        group_layout.addWidget(content)
+        group.set_content(content)
+        return group
+
     def _show_task_table_dialog(self) -> None:
         if self.task_panel.parentWidget() is self.task_table_dialog:
             self.task_table_dialog.raise_()
@@ -1421,12 +1527,23 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.open_video_button.clicked.connect(self.open_video)
         self.import_csv_button.clicked.connect(self.import_csv)
+        self.import_preannotation_action.triggered.connect(
+            self.import_preannotation_json
+        )
         self.save_csv_button.clicked.connect(self.save_csv)
+        self.export_dataset_action.triggered.connect(self.export_dataset)
         self.new_project_action.triggered.connect(self.new_project)
         self.open_project_action.triggered.connect(self.open_project)
         self.save_project_action.triggered.connect(self.save_project)
+        self.save_version_action.triggered.connect(self.save_project_version)
         self.restore_project_action.triggered.connect(
             self.restore_project_from_backup
+        )
+        self.restore_version_action.triggered.connect(
+            self.restore_project_from_version
+        )
+        self.hotkey_settings_action.triggered.connect(
+            self.show_hotkey_settings
         )
         self.project_video_combo.currentIndexChanged.connect(
             lambda index: self.switch_active_video(
@@ -1440,6 +1557,9 @@ class MainWindow(QMainWindow):
         self.set_start_button.clicked.connect(self._set_start_from_player)
         self.set_end_button.clicked.connect(self._set_end_from_player)
         self.timeline_slider.valueChanged.connect(self._seek_to_milliseconds)
+        self.timeline_slider.segment_range_changed.connect(
+            self._set_clip_range_from_timeline
+        )
         self.speed_combo.currentIndexChanged.connect(self._on_speed_preset_changed)
         self.custom_speed_spin.editingFinished.connect(
             self._on_custom_speed_committed
@@ -1467,6 +1587,8 @@ class MainWindow(QMainWindow):
         self.polarity_combo.currentTextChanged.connect(self._update_label_group_titles)
         self.lighting_combo.currentTextChanged.connect(self._update_label_group_titles)
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
+        self.start_spin.valueChanged.connect(self._sync_timeline_segment_range)
+        self.end_spin.valueChanged.connect(self._sync_timeline_segment_range)
         self.add_custom_behavior_tag_button.clicked.connect(
             self.add_custom_behavior_tag
         )
@@ -1476,6 +1598,11 @@ class MainWindow(QMainWindow):
         self.remove_custom_behavior_tag_button.clicked.connect(
             self._remove_selected_custom_behavior_tag
         )
+        self.custom_tag_color_button.clicked.connect(
+            self._choose_selected_custom_tag_color
+        )
+        self.import_tag_preset_button.clicked.connect(self.import_tag_preset)
+        self.export_tag_preset_button.clicked.connect(self.export_tag_preset)
 
         self.add_button.clicked.connect(self.add_or_update_clip)
         self.remove_button.clicked.connect(self.remove_selected_clip)
@@ -1504,38 +1631,99 @@ class MainWindow(QMainWindow):
         self.project_queue_button.clicked.connect(self.show_project_export_queue)
         self.cancel_export_button.clicked.connect(self.cancel_export)
         self.shortcut_help_button.clicked.connect(self.show_shortcut_help)
+        self.copy_log_button.clicked.connect(self.copy_log)
+        self.clear_log_button.clicked.connect(self.clear_log)
         self._register_shortcuts()
 
     def _register_shortcuts(self) -> None:
-        bindings = {
-            "play_pause": ("Space", self.toggle_playback),
-            "previous_frame": ("A", lambda: self._step_frame(-1)),
-            "next_frame": ("D", lambda: self._step_frame(1)),
-            "set_start": ("S", self._set_start_from_player),
-            "set_end": ("E", self._set_end_from_player),
-            "delete_selected": ("Del", self.remove_selected_clip),
-            "undo": ("Ctrl+Z", self.undo_segments),
-            "redo": ("Ctrl+Y", self.redo_segments),
-            "save_project": ("Ctrl+S", self.save_project),
+        callbacks: dict[str, Callable[[], None]] = {
+            "play_pause": self.toggle_playback,
+            "previous_frame": lambda: self._step_frame(-1),
+            "next_frame": lambda: self._step_frame(1),
+            "set_start": self._set_start_from_player,
+            "set_end": self._set_end_from_player,
+            "delete_selected": self.remove_selected_clip,
+            "undo": self.undo_segments,
+            "redo": self.redo_segments,
+            "save_project": self.save_project,
         }
+        for shortcut in getattr(self, "shortcuts", {}).values():
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
         self.shortcuts = {}
-        for name, (sequence, callback) in bindings.items():
+        for name, callback in callbacks.items():
+            sequence = self.hotkey_bindings.get(name, DEFAULT_HOTKEYS[name])
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(callback)
             self.shortcuts[name] = shortcut
 
+    def apply_hotkey_bindings(self, bindings: dict[str, str]) -> None:
+        if set(bindings) != set(DEFAULT_HOTKEYS):
+            raise ValueError("All hotkey actions must be configured.")
+        normalized: dict[str, str] = {}
+        for name in DEFAULT_HOTKEYS:
+            sequence = QKeySequence(bindings[name])
+            if sequence.isEmpty():
+                raise ValueError("A hotkey cannot be empty.")
+            normalized[name] = sequence.toString(
+                QKeySequence.SequenceFormat.PortableText
+            )
+        if len({value.casefold() for value in normalized.values()}) != len(normalized):
+            raise ValueError("Each action must use a different hotkey.")
+        save_hotkey_preferences(self._hotkey_preferences_path, normalized)
+        self.hotkey_bindings = normalized
+        self._register_shortcuts()
+
+    def show_hotkey_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("配置快捷键")
+        layout = QFormLayout(dialog)
+        editors: dict[str, QKeySequenceEdit] = {}
+        for name, label in HOTKEY_ACTION_LABELS.items():
+            editor = QKeySequenceEdit(QKeySequence(self.hotkey_bindings[name]))
+            editors[name] = editor
+            layout.addRow(label, editor)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            dialog,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("保存")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.apply_hotkey_bindings(
+                {
+                    name: editor.keySequence().toString(
+                        QKeySequence.SequenceFormat.PortableText
+                    )
+                    for name, editor in editors.items()
+                }
+            )
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "快捷键设置", str(error))
+            return
+        self._set_status("快捷键设置已保存")
+
     def _create_shortcut_help_dialog(self) -> QDialog:
         dialog = QDialog(self)
         dialog.setWindowTitle("快捷键说明")
         layout = QVBoxLayout(dialog)
-        table = QTableWidget(len(SHORTCUT_HELP_ROWS), 2, dialog)
+        table = QTableWidget(len(HOTKEY_ACTION_LABELS), 2, dialog)
         table.setHorizontalHeaderLabels(("快捷键", "操作"))
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        for row, (shortcut, action) in enumerate(SHORTCUT_HELP_ROWS):
-            table.setItem(row, 0, QTableWidgetItem(shortcut))
+        for row, (name, action) in enumerate(HOTKEY_ACTION_LABELS.items()):
+            table.setItem(
+                row,
+                0,
+                QTableWidgetItem(self.hotkey_bindings[name]),
+            )
             table.setItem(row, 1, QTableWidgetItem(action))
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
@@ -1618,11 +1806,38 @@ class MainWindow(QMainWindow):
         self._bind_active_video(entry)
         self.task_table.clearSelection()
         if entry.path.is_file():
-            self.player.setSource(QUrl.fromLocalFile(str(entry.path)))
-            self.player.pause()
+            self._set_media_source(entry.path)
         else:
-            self.player.setSource(QUrl())
+            self._set_media_source(None)
             self._set_status(f"视频源不存在：{entry.path}")
+
+    def _set_media_source(self, path: Path | None) -> None:
+        self.player.stop()
+        self.player.setSource(QUrl())
+        self.frame_cache.clear()
+        if path is not None:
+            self.player.setSource(QUrl.fromLocalFile(str(path)))
+            self.player.pause()
+
+    def _cache_paused_video_frame(self, frame: object) -> None:
+        if (
+            self.source_path is None
+            or self.player.playbackState()
+            == QMediaPlayer.PlaybackState.PlayingState
+        ):
+            return
+        try:
+            image = frame.toImage()
+            if image.isNull():
+                return
+            cached_image = image.copy()
+            self.frame_cache.put(
+                (str(self.source_path), self.player.position()),
+                cached_image,
+                size_bytes=cached_image.sizeInBytes(),
+            )
+        except (AttributeError, RuntimeError):
+            return
 
     def _project_snapshot(self) -> LabelProject:
         settings = self.project.global_settings
@@ -1673,7 +1888,9 @@ class MainWindow(QMainWindow):
         self.source_label.setText("未选择视频")
         self.project_video_combo.clear()
         self.project_video_combo.setEnabled(False)
-        self.player.setSource(QUrl())
+        self._set_media_source(None)
+        self._project_export_queue = []
+        self.project_queue_dialog.set_items([])
         self._refresh_table()
         self.clear_editor()
         self._update_welcome_hint()
@@ -1713,6 +1930,23 @@ class MainWindow(QMainWindow):
         self._project_dirty = False
         self._set_status(f"已保存工程：{self._project_path}")
 
+    def save_project_version(self) -> None:
+        if self._project_path is None:
+            self.save_project()
+        if self._project_path is None:
+            return
+        try:
+            snapshot = create_version_snapshot(
+                self._project_path, self._project_snapshot()
+            )
+        except (OSError, ValueError) as error:
+            self._show_error(
+                "无法保存版本快照",
+                f"保存版本快照失败：{self._file_error_tip(error)}",
+            )
+            return
+        self._set_status(f"已保存版本快照：{snapshot.name}")
+
     def open_project(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -1747,6 +1981,34 @@ class MainWindow(QMainWindow):
                 )
         self._project_dirty = True
         self._set_status(f"已从备份恢复工程：{backup_path.name}")
+
+    def restore_project_from_version(self) -> None:
+        if self._project_path is None:
+            self._show_error("无法恢复版本快照", "请先保存或打开工程。")
+            return
+        snapshots = list_version_snapshots(self._project_path)
+        if not snapshots:
+            self._show_error("无法恢复版本快照", "当前工程没有可恢复的手动版本快照。")
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "从版本快照恢复工程",
+            str(snapshots[0].parent),
+            "标注工程 (*.labelproj)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename or not self._confirm_discard_dirty_project():
+            return
+        try:
+            restore_version_snapshot(self._project_path, Path(filename))
+        except (OSError, ValueError) as error:
+            self._show_error(
+                "无法恢复版本快照",
+                f"恢复版本快照失败：{self._file_error_tip(error)}",
+            )
+            return
+        if self._load_project_path(self._project_path):
+            self._set_status(f"已从版本快照恢复工程：{Path(filename).name}")
 
     def _load_project_path(self, path: Path) -> bool:
         try:
@@ -1789,9 +2051,10 @@ class MainWindow(QMainWindow):
             self.source_label.setText("未选择视频")
             self._sync_project_video_combo()
             self._refresh_table()
-            self.player.setSource(QUrl())
+            self._set_media_source(None)
         else:
             self.switch_active_video(entry.id)
+        self._restore_project_export_queue()
         self._project_dirty = False
         self._backup_timer.stop()
         self._update_welcome_hint()
@@ -1820,8 +2083,7 @@ class MainWindow(QMainWindow):
             return
         path = Path(filename)
         self.set_source_path(path)
-        self.player.setSource(QUrl.fromLocalFile(str(path)))
-        self.player.pause()
+        self._set_media_source(path)
 
     def import_csv(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -1921,6 +2183,136 @@ class MainWindow(QMainWindow):
         self._update_history_controls()
         self._set_status(f"已导入 {len(imported_records)} 个任务")
 
+    def import_preannotation_json(self) -> None:
+        if not self.source_name:
+            self._show_error("无法导入预标注", "请先选择要人工复核的源视频。")
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入预标注 JSON",
+            "",
+            "JSON 文件 (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename:
+            return
+        try:
+            annotations = read_preannotation_json(Path(filename))
+        except (OSError, ValueError) as error:
+            self._show_error("无法导入预标注", str(error))
+            return
+        self._show_preannotation_preview(annotations)
+
+    def _show_preannotation_preview(
+        self, annotations: Sequence[PreAnnotation]
+    ) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("预标注复核")
+        dialog.setMinimumWidth(680)
+        layout = QVBoxLayout(dialog)
+        table = QTableWidget(len(annotations), 5, dialog)
+        table.setHorizontalHeaderLabels(("导入", "开始", "结束", "标签", "正负例"))
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        for row, annotation in enumerate(annotations):
+            selected = QTableWidgetItem()
+            selected.setFlags(
+                selected.flags() | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            selected.setCheckState(Qt.CheckState.Checked)
+            table.setItem(row, 0, selected)
+            table.setItem(row, 1, QTableWidgetItem(f"{annotation.start_seconds:.3f}"))
+            table.setItem(row, 2, QTableWidgetItem(f"{annotation.end_seconds:.3f}"))
+            table.setItem(row, 3, QTableWidgetItem(", ".join(annotation.behaviors)))
+            table.setItem(row, 4, QTableWidgetItem(annotation.polarity))
+        table.horizontalHeader().setStretchLastSection(True)
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            dialog,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("导入已勾选片段")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected_annotations = [
+            annotation
+            for row, annotation in enumerate(annotations)
+            if table.item(row, 0).checkState() == Qt.CheckState.Checked
+        ]
+        self._apply_preannotations(selected_annotations)
+
+    def _apply_preannotations(
+        self, annotations: Sequence[PreAnnotation]
+    ) -> None:
+        if not annotations:
+            return
+        try:
+            source = self.source_name.strip()
+            if not source:
+                raise ValueError("请先选择源视频。")
+            metadata = ProjectMetadata(
+                date=self.date_edit.text().strip(),
+                camera=self.camera_edit.text().strip(),
+                view=self.view_combo.currentText(),
+            )
+            existing_outputs = {record.output for record in self.records}
+            sequence = next_sequence(record.sequence for record in self.records)
+            imported: list[ClipRecord] = []
+            for annotation in annotations:
+                behaviors = tuple(
+                    dict.fromkeys(
+                        normalize_label_token(tag, "行为标签")
+                        for tag in annotation.behaviors
+                    )
+                )
+                polarity = normalize_label_token(
+                    annotation.polarity or self.polarity_combo.currentText(),
+                    "正负例",
+                )
+                lighting = normalize_label_token(
+                    annotation.lighting or self.lighting_combo.currentText(),
+                    "光照",
+                )
+                output = build_filename(
+                    metadata, behaviors, polarity, lighting, sequence
+                )
+                if output in existing_outputs:
+                    raise ValueError(f"导出文件名重复：{output}")
+                imported.append(
+                    ClipRecord(
+                        source=source,
+                        start_seconds=annotation.start_seconds,
+                        end_seconds=annotation.end_seconds,
+                        output=output,
+                        behaviors=behaviors,
+                        polarity=polarity,
+                        lighting=lighting,
+                        sequence=sequence,
+                    )
+                )
+                existing_outputs.add(output)
+                sequence += 1
+        except ValueError as error:
+            self._show_error("无法导入预标注", str(error))
+            return
+
+        before = list(self.records)
+        self._register_imported_behavior_tags(imported)
+        self.records.extend(imported)
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self.sequence_spin.setValue(sequence)
+        self._refresh_table()
+        self._mark_project_dirty()
+        self._update_history_controls()
+        self._set_status(f"已导入 {len(imported)} 个待复核预标注片段")
+
     def save_csv(self) -> None:
         if not self.records:
             self._show_error("没有片段任务", "保存 CSV 前请至少添加一个片段。")
@@ -1948,6 +2340,58 @@ class MainWindow(QMainWindow):
             return
         self._set_status(f"已保存 CSV：{filename}")
 
+    def export_dataset(self) -> None:
+        if not self.records:
+            self._show_error("没有片段任务", "导出数据集前请至少添加一个片段。")
+            return
+        format_name, accepted = QInputDialog.getItem(
+            self,
+            "导出数据集",
+            "格式",
+            ("JSONL", "YOLO 标签"),
+            0,
+            False,
+        )
+        if not accepted:
+            return
+        if format_name == "JSONL":
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出 JSONL 数据集",
+                "clips.jsonl",
+                "JSONL 文件 (*.jsonl)",
+                options=QFileDialog.Option.DontUseNativeDialog,
+            )
+            if not filename:
+                return
+            try:
+                write_clip_jsonl(Path(filename), self.records)
+            except OSError as error:
+                self._show_error(
+                    "无法导出 JSONL", self._file_error_tip(error)
+                )
+                return
+            self._set_status(f"已导出 JSONL 数据集：{filename}")
+            return
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "选择 YOLO 标签目录",
+            str(self.output_dir or Path.home()),
+            options=(
+                QFileDialog.Option.ShowDirsOnly
+                | QFileDialog.Option.DontUseNativeDialog
+            ),
+        )
+        if not directory:
+            return
+        try:
+            write_clip_yolo(Path(directory), self.records)
+        except OSError as error:
+            self._show_error("无法导出 YOLO 标签", self._file_error_tip(error))
+            return
+        self._set_status(f"已导出 YOLO 标签：{directory}")
+
     def select_output_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self,
@@ -1969,6 +2413,21 @@ class MainWindow(QMainWindow):
     def set_clip_range(self, start_seconds: float, end_seconds: float) -> None:
         self.start_spin.setValue(start_seconds)
         self.end_spin.setValue(end_seconds)
+        self._sync_timeline_segment_range()
+
+    def _sync_timeline_segment_range(self, *_args: object) -> None:
+        if not hasattr(self, "timeline_slider"):
+            return
+        self.timeline_slider.set_segment_range(
+            round(self.start_spin.value() * 1000),
+            round(self.end_spin.value() * 1000),
+        )
+
+    def _set_clip_range_from_timeline(
+        self, start_milliseconds: int, end_milliseconds: int
+    ) -> None:
+        self.start_spin.setValue(start_milliseconds / 1000)
+        self.end_spin.setValue(end_milliseconds / 1000)
 
     def selected_behaviors(self) -> tuple[str, ...]:
         return tuple(
@@ -2002,6 +2461,79 @@ class MainWindow(QMainWindow):
         self._rebuild_behavior_controls(selected)
         self.set_clip_range(start_seconds, end_seconds)
         self._mark_project_dirty()
+
+    def set_custom_behavior_tag_color(self, tag: str, color: str) -> None:
+        if tag not in self.project.custom_behavior_tags:
+            raise ValueError("只能为自定义标签设置颜色")
+        selected_color = QColor(color)
+        if not selected_color.isValid():
+            raise ValueError("标签颜色无效")
+        self.project.custom_behavior_tag_colors[tag] = selected_color.name().upper()
+        self._rebuild_behavior_controls(self.selected_behaviors())
+        self._mark_project_dirty()
+
+    def _choose_selected_custom_tag_color(self) -> None:
+        tag = self.custom_tag_library_combo.currentData()
+        if not isinstance(tag, str):
+            return
+        current = QColor(
+            self.project.custom_behavior_tag_colors.get(tag, "#3F9CFF")
+        )
+        color = QColorDialog.getColor(current, self, "设置标签颜色")
+        if not color.isValid():
+            return
+        self.set_custom_behavior_tag_color(tag, color.name().upper())
+
+    def export_tag_preset(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出标签预设",
+            "标签预设.tagpreset.json",
+            "标签预设 (*.tagpreset.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename:
+            return
+        try:
+            path = save_tag_preset(
+                Path(filename),
+                self.project.custom_behavior_tags,
+                self.project.custom_behavior_tag_colors,
+            )
+        except (OSError, ValueError) as error:
+            self._show_error(
+                "无法导出标签预设",
+                f"导出标签预设失败：{self._file_error_tip(error)}",
+            )
+            return
+        self._set_status(f"已导出标签预设：{path.name}")
+
+    def import_tag_preset(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "导入标签预设",
+            "",
+            "标签预设 (*.tagpreset.json)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename:
+            return
+        try:
+            tags, colors = load_tag_preset(Path(filename))
+        except (OSError, ValueError) as error:
+            self._show_error(
+                "无法导入标签预设",
+                f"导入标签预设失败：{self._file_error_tip(error)}",
+            )
+            return
+        selected = self.selected_behaviors()
+        self.project.custom_behavior_tags = list(
+            dict.fromkeys((*self.project.custom_behavior_tags, *tags))
+        )
+        self.project.custom_behavior_tag_colors.update(colors)
+        self._rebuild_behavior_controls(selected)
+        self._mark_project_dirty()
+        self._set_status(f"已导入标签预设：{Path(filename).name}")
 
     def _register_imported_behavior_tags(
         self,
@@ -2056,6 +2588,7 @@ class MainWindow(QMainWindow):
                 if behavior != tag
             )
         self.project.custom_behavior_tags.remove(tag)
+        self.project.custom_behavior_tag_colors.pop(tag, None)
         self._rebuild_behavior_controls(selected)
         self._mark_project_dirty()
 
@@ -2236,6 +2769,7 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(self.timeline_slider):
             self.timeline_slider.setRange(0, max(0, milliseconds))
         self.duration_label.setText(format_seconds(milliseconds / 1000))
+        self._sync_timeline_segment_range()
 
     def _update_play_button(self, state: QMediaPlayer.PlaybackState) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
@@ -2465,14 +2999,29 @@ class MainWindow(QMainWindow):
         polarity: str | None,
         lighting: str | None,
         view: str | None,
+        *,
+        behavior_mode: str = "replace",
     ) -> None:
+        if behavior_mode not in {"replace", "add", "remove"}:
+            raise ValueError("行为标签批量操作无效")
         selected_indexes = set(indexes)
         proposed: dict[int, ClipRecord] = {}
         skipped_manual_view = False
 
         for index in indexes:
             record = self.records[index]
-            next_behaviors = behaviors if behaviors is not None else record.behaviors
+            if behaviors is None:
+                next_behaviors = record.behaviors
+            elif behavior_mode == "replace":
+                next_behaviors = behaviors
+            elif behavior_mode == "add":
+                next_behaviors = tuple(dict.fromkeys((*record.behaviors, *behaviors)))
+            else:
+                next_behaviors = tuple(
+                    tag for tag in record.behaviors if tag not in behaviors
+                )
+            if not next_behaviors:
+                raise ValueError("移除后片段至少需要保留一个行为标签")
             next_polarity = polarity if polarity is not None else record.polarity
             next_lighting = lighting if lighting is not None else record.lighting
             parsed = parse_filename(record.output)
@@ -2545,6 +3094,10 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("批量修改选中片段")
         layout = QVBoxLayout(dialog)
         apply_behaviors = QCheckBox("应用此字段：行为标签")
+        behavior_mode_combo = QComboBox()
+        behavior_mode_combo.addItem("替换为所选标签", "replace")
+        behavior_mode_combo.addItem("添加所选标签", "add")
+        behavior_mode_combo.addItem("移除所选标签", "remove")
         batch_behavior_checks = {
             behavior: QCheckBox(behavior)
             for behavior in self._available_behavior_tags()
@@ -2561,6 +3114,7 @@ class MainWindow(QMainWindow):
         )
 
         layout.addWidget(apply_behaviors)
+        layout.addWidget(behavior_mode_combo)
         for checkbox in batch_behavior_checks.values():
             layout.addWidget(checkbox)
         layout.addWidget(apply_polarity)
@@ -2597,7 +3151,14 @@ class MainWindow(QMainWindow):
         )
         view = view_combo.currentText() if apply_view.isChecked() else None
         try:
-            self._apply_batch_changes(indexes, behaviors, polarity, lighting, view)
+            self._apply_batch_changes(
+                indexes,
+                behaviors,
+                polarity,
+                lighting,
+                view,
+                behavior_mode=behavior_mode_combo.currentData(),
+            )
         except ValueError as error:
             self._show_error("批量修改失败", str(error))
 
@@ -2737,6 +3298,7 @@ class MainWindow(QMainWindow):
             self._project_export_queue = list(zip(input_paths, records))
             self.project_queue_dialog.set_items(self._project_export_queue)
             self.project_queue_dialog.cancel_button.setEnabled(True)
+            self._persist_project_export_queue()
             self.show_project_export_queue()
         self._export_worker.clip_finished.connect(self._export_clip_finished)
         self._export_worker.progress.connect(self._export_progress)
@@ -2761,8 +3323,13 @@ class MainWindow(QMainWindow):
         if not 0 <= _index < len(self._export_records):
             return
         record = self._export_records[_index]
+        detail = f"：{record.error}" if record.error else ""
+        self._append_log(
+            f"导出 {record.output}：{STATUS_LABELS.get(record.status, record.status)}{detail}"
+        )
         if self._is_project_export:
             self.project_queue_dialog.update_item(_index, record)
+            self._persist_project_export_queue()
         record_state = (record.status, record.error)
         if (
             self._project_path is not None
@@ -2783,6 +3350,8 @@ class MainWindow(QMainWindow):
         self.project_export_button.setEnabled(True)
         self.cancel_export_button.setEnabled(False)
         self.project_queue_dialog.cancel_button.setEnabled(False)
+        if self._is_project_export:
+            self._persist_project_export_queue()
         self._export_worker = None
         self._export_records = []
         self._export_record_states = []
@@ -2799,6 +3368,18 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
+        self._append_log(text)
+
+    def _append_log(self, text: str) -> None:
+        if text and hasattr(self, "log_panel"):
+            self.log_panel.appendPlainText(text)
+
+    def clear_log(self) -> None:
+        self.log_panel.clear()
+
+    def copy_log(self) -> None:
+        self.log_panel.selectAll()
+        self.log_panel.copy()
 
     @staticmethod
     def _file_error_tip(error: Exception) -> str:
@@ -2810,6 +3391,36 @@ class MainWindow(QMainWindow):
         self.project_queue_dialog.show()
         self.project_queue_dialog.raise_()
         self.project_queue_dialog.activateWindow()
+
+    def _persist_project_export_queue(self) -> None:
+        if self._project_path is None:
+            return
+        try:
+            save_export_queue_state(
+                self._project_path,
+                self.output_dir,
+                self._project_export_queue,
+            )
+        except (OSError, ValueError) as error:
+            self._set_status(
+                f"保存导出队列失败：{self._file_error_tip(error)}"
+            )
+
+    def _restore_project_export_queue(self) -> None:
+        if self._project_path is None:
+            return
+        try:
+            output_dir, items = load_export_queue_state(self._project_path)
+        except (OSError, ValueError) as error:
+            self._set_status(
+                f"恢复导出队列失败：{self._file_error_tip(error)}"
+            )
+            return
+        self._project_export_queue = items
+        if self.output_dir is None and output_dir is not None:
+            self.output_dir = output_dir
+            self._set_output_folder_display()
+        self.project_queue_dialog.set_items(items)
 
     def _cleanup_orphaned_export_parts(self, *, prompt: bool) -> None:
         if self.output_dir is None:

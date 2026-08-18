@@ -56,6 +56,141 @@ def test_project_round_trip_preserves_custom_behavior_tags(tmp_path):
     ]
 
 
+def test_project_round_trip_preserves_custom_behavior_tag_colors(tmp_path):
+    from video_labeler.project_io import load_project, new_project, save_project
+
+    project = new_project()
+    project.custom_behavior_tags = ["delivery_dropoff"]
+    project.custom_behavior_tag_colors = {"delivery_dropoff": "#3F9CFF"}
+
+    target = save_project(tmp_path / "work.labelproj", project)
+
+    assert load_project(target).custom_behavior_tag_colors == {
+        "delivery_dropoff": "#3F9CFF"
+    }
+
+
+def test_manual_version_snapshot_can_restore_the_saved_project(tmp_path):
+    from datetime import datetime
+
+    from video_labeler.project_io import (
+        add_or_activate_video,
+        create_version_snapshot,
+        list_version_snapshots,
+        load_project,
+        new_project,
+        restore_version_snapshot,
+        save_project,
+    )
+
+    project_path = tmp_path / "work.labelproj"
+    project = new_project()
+    video = add_or_activate_video(project, tmp_path / "camera.mp4")
+    video.segments.append(
+        ClipRecord(
+            source="camera.mp4",
+            start_seconds=1,
+            end_seconds=2,
+            output="first.mp4",
+            behaviors=("dog_out",),
+            polarity="pos",
+            lighting="daytime",
+            sequence=1,
+        )
+    )
+    save_project(project_path, project)
+    snapshot = create_version_snapshot(
+        project_path, project, now=datetime(2026, 8, 18, 9, 30, 0)
+    )
+
+    video.segments[0].status = "fail"
+    save_project(project_path, project)
+    restored = restore_version_snapshot(project_path, snapshot)
+
+    assert snapshot.parent == tmp_path / ".versions"
+    assert list_version_snapshots(project_path) == [snapshot]
+    assert restored.videos[0].segments[0].status == "queued"
+    assert load_project(project_path).videos[0].segments[0].status == "queued"
+
+
+def test_tag_preset_and_export_queue_sidecars_round_trip(tmp_path):
+    from video_labeler.project_io import (
+        load_export_queue_state,
+        load_tag_preset,
+        save_export_queue_state,
+        save_tag_preset,
+    )
+
+    source = (tmp_path / "camera.mp4").resolve()
+    record = ClipRecord(
+        source="camera.mp4",
+        start_seconds=1,
+        end_seconds=2,
+        output="first.mp4",
+        behaviors=("delivery_dropoff",),
+        polarity="pos",
+        lighting="daytime",
+        sequence=1,
+        status="fail",
+        error="write denied",
+    )
+
+    preset = save_tag_preset(
+        tmp_path / "team-tags",
+        ["delivery_dropoff"],
+        {"delivery_dropoff": "#3F9CFF"},
+    )
+    output_dir = tmp_path / "output"
+    state = save_export_queue_state(
+        tmp_path / "work.labelproj", output_dir, [(source, record)]
+    )
+
+    assert preset.name == "team-tags.tagpreset.json"
+    assert load_tag_preset(preset) == (
+        ["delivery_dropoff"],
+        {"delivery_dropoff": "#3F9CFF"},
+    )
+    restored_output_dir, restored_items = load_export_queue_state(
+        tmp_path / "work.labelproj"
+    )
+    assert state.name == "work.labelproj.export-queue.json"
+    assert restored_output_dir == output_dir
+    assert restored_items == [(source, record)]
+
+
+def test_project_loader_rejects_segments_with_an_invalid_time_range():
+    from video_labeler.project_io import project_from_dict
+
+    with pytest.raises(ValueError, match="end_seconds"):
+        project_from_dict(
+            {
+                "version": 1,
+                "active_video_id": "video-1",
+                "global_settings": {},
+                "videos": [
+                    {
+                        "id": "video-1",
+                        "path": "C:/video.mp4",
+                        "segments": [
+                            {
+                                "source": "video.mp4",
+                                "start_seconds": 2,
+                                "end_seconds": 1,
+                                "output": "clip.mp4",
+                                "behaviors": ["dog_out"],
+                                "polarity": "pos",
+                                "lighting": "daytime",
+                                "sequence": 1,
+                                "status": "queued",
+                                "error": "",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
 def test_legacy_project_without_custom_behavior_tags_loads_an_empty_list(tmp_path):
     from video_labeler.project_io import load_project
 

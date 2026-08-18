@@ -1750,6 +1750,183 @@ def test_add_custom_behavior_tag_registers_project_data_and_preserves_fixed_fiel
     assert window.lighting_combo.currentText() == "night_full_color"
 
 
+def test_custom_tag_color_and_preset_merge_are_persisted_in_the_ui(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    window.custom_behavior_tag_edit.setText("delivery_dropoff")
+    window.add_custom_behavior_tag()
+    window.set_custom_behavior_tag_color("delivery_dropoff", "#3F9CFF")
+    preset_path = tmp_path / "team.tagpreset.json"
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(preset_path), "Preset")),
+    )
+    window.export_tag_preset()
+
+    restored = MainWindow()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *_args, **_kwargs: (str(preset_path), "Preset")),
+    )
+    restored.import_tag_preset()
+
+    assert preset_path.is_file()
+    assert restored.project.custom_behavior_tags == ["delivery_dropoff"]
+    assert restored.project.custom_behavior_tag_colors == {
+        "delivery_dropoff": "#3F9CFF"
+    }
+    assert "#3F9CFF" in restored.behavior_checks["delivery_dropoff"].styleSheet()
+
+
+def test_batch_tag_add_and_remove_preserve_unrelated_tags(qt_app):
+    window = MainWindow()
+    window.records = [_clip_record("source.mp4", 1), _clip_record("source.mp4", 2)]
+
+    window._apply_batch_changes(
+        [0, 1],
+        ("fall",),
+        None,
+        None,
+        None,
+        behavior_mode="add",
+    )
+    window._apply_batch_changes(
+        [0, 1],
+        ("dog_out",),
+        None,
+        None,
+        None,
+        behavior_mode="remove",
+    )
+
+    assert [record.behaviors for record in window.records] == [
+        ("fall",),
+        ("fall",),
+    ]
+
+
+def test_switching_videos_clears_the_bounded_frame_cache(qt_app, tmp_path):
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    first.touch()
+    second.touch()
+    window = MainWindow()
+    window.set_source_path(first)
+    first_id = window.project.active_video_id
+    window.set_source_path(second)
+    second_id = window.project.active_video_id
+    window.switch_active_video(first_id)
+    window.frame_cache.put("frame", b"frame", size_bytes=5)
+
+    window.switch_active_video(second_id)
+
+    assert len(window.frame_cache) == 0
+
+
+def test_project_export_queue_is_restored_from_its_sidecar(qt_app, tmp_path):
+    source = tmp_path / "camera.mp4"
+    project_path = tmp_path / "work.labelproj"
+    window = MainWindow()
+    window.set_source_path(source)
+    window.records.append(_clip_record(source.name, 1))
+    window._project_path = project_path
+    window.save_project()
+    window.records[0].status = "fail"
+    window.records[0].error = "write denied"
+    window._project_export_queue = [(source, window.records[0])]
+    window._persist_project_export_queue()
+
+    restored = MainWindow()
+    assert restored._load_project_path(project_path)
+
+    assert len(restored._project_export_queue) == 1
+    assert restored.project_queue_dialog.table.item(0, 3).text() == "失败"
+    assert restored.project_queue_dialog.table.item(0, 4).text() == "write denied"
+
+
+def test_invalid_time_range_shows_a_warning_without_adding_a_segment(
+    qt_app, tmp_path, monkeypatch
+):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "camera.mp4")
+    window.set_clip_range(4, 2)
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        staticmethod(lambda _parent, title, text: messages.append((title, text))),
+    )
+
+    window.add_or_update_clip()
+
+    assert window.records == []
+    assert len(messages) == 1
+
+
+def test_timeline_segment_edge_adjustment_updates_clip_time_controls(qt_app):
+    window = MainWindow()
+    window.timeline_slider.setRange(0, 10_000)
+    window.set_clip_range(1.0, 3.0)
+
+    window.timeline_slider.adjust_segment_edge("end", 4_000)
+
+    assert window.start_spin.value() == pytest.approx(1.0)
+    assert window.end_spin.value() == pytest.approx(4.0)
+
+
+def test_applying_reviewed_preannotations_adds_labeled_segments(qt_app, tmp_path):
+    from video_labeler.preannotation_io import PreAnnotation
+
+    window = MainWindow()
+    window.set_source_path(tmp_path / "camera.mp4")
+    window.date_edit.setText("20260818")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+
+    window._apply_preannotations(
+        [
+            PreAnnotation(
+                start_seconds=1.0,
+                end_seconds=2.0,
+                behaviors=("delivery_dropoff",),
+                polarity="pos",
+                lighting="daytime",
+            )
+        ]
+    )
+
+    assert window.records[0].behaviors == ("delivery_dropoff",)
+    assert "delivery_dropoff" in window.project.custom_behavior_tags
+
+
+def test_hotkey_rebinding_persists_and_rebuilds_window_shortcuts(qt_app, tmp_path):
+    from video_labeler.preferences_io import DEFAULT_HOTKEYS, load_hotkey_preferences
+
+    window = MainWindow()
+    window._hotkey_preferences_path = tmp_path / "preferences.json"
+    bindings = {**DEFAULT_HOTKEYS, "play_pause": "F5"}
+
+    window.apply_hotkey_bindings(bindings)
+
+    assert window.shortcuts["play_pause"].key() == QKeySequence("F5")
+    assert load_hotkey_preferences(window._hotkey_preferences_path)["play_pause"] == "F5"
+
+
+def test_log_panel_appends_copies_and_clears_operation_messages(qt_app):
+    window = MainWindow()
+
+    window._set_status("export started")
+    window.copy_log()
+
+    assert "export started" in window.log_panel.toPlainText()
+    assert "export started" in QApplication.clipboard().text()
+    window.clear_log()
+    assert window.log_panel.toPlainText() == ""
+
+
 def test_adding_custom_behavior_tag_partially_refreshes_editor_fields(
     qt_app, monkeypatch
 ):
@@ -2244,29 +2421,45 @@ def test_project_settings_card_is_expanded_and_collapsible(qt_app):
     )
 
 
-def test_annotation_time_and_action_controls_share_horizontal_rows(qt_app):
+def test_annotation_actions_use_primary_and_secondary_rows_without_clipping(qt_app):
     window = MainWindow()
-    window.resize(1440, 900)
+    window.resize(1366, 768)
     window.show()
     qt_app.processEvents()
 
-    time_y = {
-        control.mapTo(window.annotation_panel, QPoint(0, 0)).y()
-        for control in (window.start_spin, window.end_spin, window.sequence_spin)
-    }
-    action_y = {
+    primary_y = window.add_button.mapTo(
+        window.annotation_panel, QPoint(0, 0)
+    ).y()
+    secondary_y = {
         control.mapTo(window.annotation_panel, QPoint(0, 0)).y()
         for control in (
-            window.add_button,
             window.remove_button,
             window.undo_button,
             window.redo_button,
             window.clear_button,
         )
     }
+    panel_rect = window.annotation_panel.contentsRect()
+    actions = (
+        window.add_button,
+        window.remove_button,
+        window.undo_button,
+        window.redo_button,
+        window.clear_button,
+    )
 
-    assert len(time_y) == 1
-    assert len(action_y) == 1
+    assert primary_y < min(secondary_y)
+    assert len(secondary_y) == 1
+    assert all(
+        panel_rect.contains(action.mapTo(window.annotation_panel, QPoint()))
+        and panel_rect.contains(
+            action.mapTo(
+                window.annotation_panel,
+                QPoint(action.width() - 1, action.height() - 1),
+            )
+        )
+        for action in actions
+    )
 
 
 def test_lighting_and_polarity_use_independent_collapsible_groups(qt_app):

@@ -6,6 +6,7 @@ import ctypes
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,9 @@ from video_labeler.naming import normalize_label_token
 
 PROJECT_VERSION = 1
 PROJECT_SUFFIX = ".labelproj"
+TAG_PRESET_VERSION = 1
+TAG_PRESET_SUFFIX = ".tagpreset.json"
+EXPORT_QUEUE_VERSION = 1
 
 
 @dataclass
@@ -33,6 +37,7 @@ class LabelProject:
     active_video_id: str | None = None
     global_settings: dict[str, str] = field(default_factory=dict)
     custom_behavior_tags: list[str] = field(default_factory=list)
+    custom_behavior_tag_colors: dict[str, str] = field(default_factory=dict)
 
 
 def new_project() -> LabelProject:
@@ -72,6 +77,7 @@ def project_to_dict(project: LabelProject) -> dict[str, Any]:
         "active_video_id": project.active_video_id,
         "global_settings": dict(project.global_settings),
         "custom_behavior_tags": list(project.custom_behavior_tags),
+        "custom_behavior_tag_colors": dict(project.custom_behavior_tag_colors),
         "videos": videos,
     }
     return _validated_document(document)
@@ -92,19 +98,13 @@ def project_from_dict(document: Any) -> LabelProject:
         active_video_id=validated["active_video_id"],
         global_settings=validated["global_settings"],
         custom_behavior_tags=validated["custom_behavior_tags"],
+        custom_behavior_tag_colors=validated["custom_behavior_tag_colors"],
     )
 
 
 def save_project(path: Path, project: LabelProject) -> Path:
     target = _project_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
-    serialized = json.dumps(project_to_dict(project), ensure_ascii=False, indent=2)
-    try:
-        temporary.write_text(serialized, encoding="utf-8")
-        temporary.replace(target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    _write_json_atomic(target, project_to_dict(project))
     return target
 
 
@@ -139,11 +139,150 @@ def create_backup(
     return backup_path
 
 
+def create_version_snapshot(
+    project_path: Path,
+    project: LabelProject,
+    *,
+    now: datetime | None = None,
+) -> Path:
+    target = _project_path(project_path)
+    versions_dir = target.parent / ".versions"
+    versions_dir.mkdir(parents=True, exist_ok=True)
+    _mark_hidden_on_windows(versions_dir)
+    timestamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    snapshot = versions_dir / f"{target.stem}_{timestamp}{PROJECT_SUFFIX}"
+    while snapshot.exists():
+        snapshot = snapshot.with_name(f"{snapshot.stem}_{uuid4().hex[:8]}{PROJECT_SUFFIX}")
+    save_project(snapshot, project)
+    return snapshot
+
+
+def list_version_snapshots(project_path: Path) -> list[Path]:
+    target = _project_path(project_path)
+    versions_dir = target.parent / ".versions"
+    if not versions_dir.is_dir():
+        return []
+    return sorted(
+        versions_dir.glob(f"{target.stem}_*{PROJECT_SUFFIX}"),
+        key=lambda snapshot: snapshot.name,
+        reverse=True,
+    )
+
+
+def restore_version_snapshot(project_path: Path, snapshot_path: Path) -> LabelProject:
+    target = _project_path(project_path)
+    expected_dir = (target.parent / ".versions").resolve()
+    snapshot = Path(snapshot_path).resolve()
+    if snapshot.parent != expected_dir or not snapshot.name.startswith(
+        f"{target.stem}_"
+    ):
+        raise ValueError("version snapshot does not belong to this project")
+    project = load_project(snapshot)
+    save_project(target, project)
+    return project
+
+
+def save_tag_preset(
+    path: Path,
+    tags: list[str],
+    colors: dict[str, str],
+) -> Path:
+    document = _validated_tag_preset(
+        {
+            "version": TAG_PRESET_VERSION,
+            "custom_behavior_tags": list(tags),
+            "custom_behavior_tag_colors": dict(colors),
+        }
+    )
+    target = _tag_preset_path(path)
+    _write_json_atomic(target, document)
+    return target
+
+
+def load_tag_preset(path: Path) -> tuple[list[str], dict[str, str]]:
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("tag preset JSON is invalid") from error
+    validated = _validated_tag_preset(document)
+    return validated["custom_behavior_tags"], validated["custom_behavior_tag_colors"]
+
+
+def save_export_queue_state(
+    project_path: Path,
+    output_dir: Path | None,
+    items: list[tuple[Path, ClipRecord]],
+) -> Path:
+    target = _export_queue_state_path(project_path)
+    normalized_output = (
+        str(Path(output_dir).expanduser().resolve(strict=False))
+        if output_dir is not None
+        else None
+    )
+    document = {
+        "version": EXPORT_QUEUE_VERSION,
+        "output_dir": normalized_output,
+        "items": [
+            {
+                "source_path": str(Path(source).expanduser().resolve(strict=False)),
+                "record": _record_to_dict(record),
+            }
+            for source, record in items
+        ],
+    }
+    _write_json_atomic(target, _validated_export_queue_state(document))
+    return target
+
+
+def load_export_queue_state(
+    project_path: Path,
+) -> tuple[Path | None, list[tuple[Path, ClipRecord]]]:
+    state_path = _export_queue_state_path(project_path)
+    if not state_path.is_file():
+        return None, []
+    try:
+        document = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("export queue JSON is invalid") from error
+    validated = _validated_export_queue_state(document)
+    output_dir = validated["output_dir"]
+    return (
+        Path(output_dir) if output_dir is not None else None,
+        [
+            (Path(item["source_path"]), _record_from_dict(item["record"]))
+            for item in validated["items"]
+        ],
+    )
+
+
 def _project_path(path: Path) -> Path:
     selected = Path(path)
     if selected.suffix.lower() == PROJECT_SUFFIX:
         return selected
     return selected.with_suffix(PROJECT_SUFFIX)
+
+
+def _tag_preset_path(path: Path) -> Path:
+    selected = Path(path)
+    if selected.name.endswith(TAG_PRESET_SUFFIX):
+        return selected
+    return selected.with_name(f"{selected.name}{TAG_PRESET_SUFFIX}")
+
+
+def _export_queue_state_path(project_path: Path) -> Path:
+    target = _project_path(project_path)
+    return target.with_name(f"{target.name}.export-queue.json")
+
+
+def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    serialized = json.dumps(document, ensure_ascii=False, indent=2)
+    try:
+        temporary.write_text(serialized, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _record_to_dict(record: ClipRecord) -> dict[str, Any]:
@@ -182,8 +321,10 @@ def _validated_document(document: Any) -> dict[str, Any]:
     if not _is_int(document.get("version")) or document["version"] != PROJECT_VERSION:
         raise ValueError(f"project version must be {PROJECT_VERSION}")
     legacy_keys = {"version", "active_video_id", "global_settings", "videos"}
-    current_keys = {*legacy_keys, "custom_behavior_tags"}
-    if set(document) not in (legacy_keys, current_keys):
+    optional_keys = {"custom_behavior_tags", "custom_behavior_tag_colors"}
+    if not legacy_keys.issubset(document) or set(document) - (
+        legacy_keys | optional_keys
+    ):
         raise ValueError("project keys are invalid")
 
     videos = document["videos"]
@@ -196,6 +337,9 @@ def _validated_document(document: Any) -> dict[str, Any]:
         raise ValueError("global_settings must contain string keys and values")
     custom_behavior_tags = _validated_custom_behavior_tags(
         document.get("custom_behavior_tags", [])
+    )
+    custom_behavior_tag_colors = _validated_custom_behavior_tag_colors(
+        document.get("custom_behavior_tag_colors", {}), custom_behavior_tags
     )
 
     validated_videos = [_validated_video(video) for video in videos]
@@ -215,6 +359,7 @@ def _validated_document(document: Any) -> dict[str, Any]:
         "active_video_id": active_video_id,
         "global_settings": dict(document["global_settings"]),
         "custom_behavior_tags": custom_behavior_tags,
+        "custom_behavior_tag_colors": custom_behavior_tag_colors,
         "videos": validated_videos,
     }
 
@@ -236,6 +381,70 @@ def _validated_custom_behavior_tags(value: Any) -> list[str]:
         seen.add(normalized)
         normalized_tags.append(normalized)
     return normalized_tags
+
+
+def _validated_custom_behavior_tag_colors(
+    value: Any, custom_behavior_tags: list[str]
+) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("custom behavior tag colors must be an object")
+    colors = {}
+    for tag, color in value.items():
+        if tag not in custom_behavior_tags:
+            raise ValueError("custom behavior tag colors must reference custom tags")
+        if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+            raise ValueError("custom behavior tag color must be a hex color")
+        colors[tag] = color.upper()
+    return colors
+
+
+def _validated_tag_preset(document: Any) -> dict[str, Any]:
+    required = {"version", "custom_behavior_tags", "custom_behavior_tag_colors"}
+    if not isinstance(document, dict) or set(document) != required:
+        raise ValueError("tag preset keys are invalid")
+    if not _is_int(document["version"]) or document["version"] != TAG_PRESET_VERSION:
+        raise ValueError(f"tag preset version must be {TAG_PRESET_VERSION}")
+    tags = _validated_custom_behavior_tags(document["custom_behavior_tags"])
+    return {
+        "version": TAG_PRESET_VERSION,
+        "custom_behavior_tags": tags,
+        "custom_behavior_tag_colors": _validated_custom_behavior_tag_colors(
+            document["custom_behavior_tag_colors"], tags
+        ),
+    }
+
+
+def _validated_export_queue_state(document: Any) -> dict[str, Any]:
+    required = {"version", "output_dir", "items"}
+    if not isinstance(document, dict) or set(document) != required:
+        raise ValueError("export queue keys are invalid")
+    if not _is_int(document["version"]) or document["version"] != EXPORT_QUEUE_VERSION:
+        raise ValueError(f"export queue version must be {EXPORT_QUEUE_VERSION}")
+    output_dir = document["output_dir"]
+    if output_dir is not None and (
+        not isinstance(output_dir, str) or not Path(output_dir).is_absolute()
+    ):
+        raise ValueError("export queue output_dir must be an absolute path or null")
+    if not isinstance(document["items"], list):
+        raise ValueError("export queue items must be a list")
+    items = []
+    for item in document["items"]:
+        if not isinstance(item, dict) or set(item) != {"source_path", "record"}:
+            raise ValueError("export queue item is invalid")
+        source_path = item["source_path"]
+        if not isinstance(source_path, str) or not Path(source_path).is_absolute():
+            raise ValueError("export queue source_path must be absolute")
+        items.append(
+            {
+                "source_path": str(Path(source_path)),
+                "record": _validated_record(item["record"]),
+            }
+        )
+    return {
+        "version": EXPORT_QUEUE_VERSION,
+        "output_dir": output_dir,
+        "items": items,
+    }
 
 
 def _validated_video(document: Any) -> dict[str, Any]:
@@ -276,6 +485,8 @@ def _validated_record(document: Any) -> dict[str, Any]:
     for key in ("start_seconds", "end_seconds"):
         if not _is_number(document[key]):
             raise ValueError(f"segment {key} must be a finite number")
+    if float(document["end_seconds"]) <= float(document["start_seconds"]):
+        raise ValueError("segment end_seconds must be greater than start_seconds")
     if not isinstance(document["behaviors"], list) or not all(
         isinstance(behavior, str) for behavior in document["behaviors"]
     ):
