@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from video_labeler.models import BEHAVIOR_LABELS, ClipRecord
 from video_labeler.naming import normalize_label_token
@@ -29,6 +29,7 @@ class ProjectVideo:
     id: str
     path: Path
     segments: list[ClipRecord] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -114,6 +115,11 @@ def load_project(path: Path) -> LabelProject:
         document = json.loads(source.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError("project JSON is invalid") from error
+    if isinstance(document, dict) and document.get("version") == 2:
+        from .project_v2 import project_from_v2_dict
+        if document.get("format") != "video-labeler-project":
+            raise ValueError("project version or format is invalid")
+        return project_from_v2_dict(document, source)
     return project_from_dict(document)
 
 
@@ -134,7 +140,8 @@ def create_backup(
 
     timestamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     backup_path = backup_dir / f"{project_target.stem}_{timestamp}{PROJECT_SUFFIX}"
-    save_project(backup_path, project)
+    from .project_v2 import save_project_v2
+    save_project_v2(backup_path, project, relative_to=project_target)
     _keep_newest_backups(backup_dir, project_target.stem, retention)
     return backup_path
 
@@ -153,7 +160,8 @@ def create_version_snapshot(
     snapshot = versions_dir / f"{target.stem}_{timestamp}{PROJECT_SUFFIX}"
     while snapshot.exists():
         snapshot = snapshot.with_name(f"{snapshot.stem}_{uuid4().hex[:8]}{PROJECT_SUFFIX}")
-    save_project(snapshot, project)
+    from .project_v2 import save_project_v2
+    save_project_v2(snapshot, project, relative_to=target)
     return snapshot
 
 
@@ -177,8 +185,16 @@ def restore_version_snapshot(project_path: Path, snapshot_path: Path) -> LabelPr
         f"{target.stem}_"
     ):
         raise ValueError("version snapshot does not belong to this project")
-    project = load_project(snapshot)
-    save_project(target, project)
+    from .project_v2 import project_from_v2_dict, save_project_v2
+    try:
+        snapshot_document = json.loads(snapshot.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("snapshot JSON is invalid") from error
+    if snapshot_document.get("version") == 2:
+        project = project_from_v2_dict(snapshot_document, target)
+    else:
+        project = project_from_dict(snapshot_document)
+    save_project_v2(target, project)
     return project
 
 
@@ -219,19 +235,42 @@ def save_export_queue_state(
         if output_dir is not None
         else None
     )
+    project_target = _project_path(project_path).resolve(strict=False)
     document = {
-        "version": EXPORT_QUEUE_VERSION,
-        "output_dir": normalized_output,
+        "version": 2,
+        "output_dir": _queue_path_value(output_dir, project_target.parent),
+        "output_dir_base": "project" if output_dir is not None else None,
         "items": [
             {
-                "source_path": str(Path(source).expanduser().resolve(strict=False)),
+                "id": str(uuid5(NAMESPACE_URL, f"{source.resolve()}:{record.source}:{record.start_seconds}:{record.end_seconds}:{record.output}")),
+                "source_path": _queue_path_value(Path(source), project_target.parent),
+                "source_path_base": "project",
                 "record": _record_to_dict(record),
             }
             for source, record in items
         ],
     }
-    _write_json_atomic(target, _validated_export_queue_state(document))
+    _validated_export_queue_state(document, project_target.parent)
+    _write_json_atomic(target, document)
     return target
+
+
+def _queue_path_value(path: Path | None, base: Path) -> str | None:
+    if path is None:
+        return None
+    try:
+        return Path(os.path.relpath(Path(path).resolve(strict=False), base)).as_posix()
+    except ValueError:
+        return str(Path(path).resolve(strict=False))
+
+
+def _resolve_queue_path(value: str | None, path_base: str, base: Path) -> Path | None:
+    if value is None:
+        return None
+    candidate = Path(value)
+    if path_base == "project" and not candidate.is_absolute():
+        return (base / candidate).resolve(strict=False)
+    return candidate.expanduser().resolve(strict=False)
 
 
 def load_export_queue_state(
@@ -244,7 +283,7 @@ def load_export_queue_state(
         document = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError("export queue JSON is invalid") from error
-    validated = _validated_export_queue_state(document)
+    validated = _validated_export_queue_state(document, state_path.parent)
     output_dir = validated["output_dir"]
     return (
         Path(output_dir) if output_dir is not None else None,
@@ -416,12 +455,27 @@ def _validated_tag_preset(document: Any) -> dict[str, Any]:
     }
 
 
-def _validated_export_queue_state(document: Any) -> dict[str, Any]:
+def _validated_export_queue_state(document: Any, base: Path | None = None) -> dict[str, Any]:
     required = {"version", "output_dir", "items"}
-    if not isinstance(document, dict) or set(document) != required:
+    if not isinstance(document, dict):
         raise ValueError("export queue keys are invalid")
-    if not _is_int(document["version"]) or document["version"] != EXPORT_QUEUE_VERSION:
-        raise ValueError(f"export queue version must be {EXPORT_QUEUE_VERSION}")
+    if document.get("version") == 2:
+        allowed = {"version", "output_dir", "output_dir_base", "items"}
+        if set(document) != allowed:
+            raise ValueError("export queue keys are invalid")
+        base = Path(base or Path.cwd()).expanduser().resolve(strict=False)
+        output = _resolve_queue_path(document["output_dir"], str(document.get("output_dir_base", "project")), base)
+        normalized = []
+        for item in document["items"]:
+            if not isinstance(item, dict) or set(item) != {"id", "source_path", "source_path_base", "record"}:
+                raise ValueError("export queue item is invalid")
+            source = _resolve_queue_path(item["source_path"], item["source_path_base"], base)
+            normalized.append({"source_path": str(source), "record": _validated_record(item["record"])})
+        return {"version": 1, "output_dir": str(output) if output is not None else None, "items": normalized}
+    if set(document) != required:
+        raise ValueError("export queue keys are invalid")
+    if not _is_int(document["version"]) or document["version"] not in (EXPORT_QUEUE_VERSION, 2):
+        raise ValueError(f"export queue version must be {EXPORT_QUEUE_VERSION} or 2")
     output_dir = document["output_dir"]
     if output_dir is not None and (
         not isinstance(output_dir, str) or not Path(output_dir).is_absolute()

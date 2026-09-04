@@ -198,6 +198,32 @@ def cleanup_orphaned_temporary_outputs(output_dir: Path) -> list[Path]:
     return removed
 
 
+def probe_media_metadata(ffprobe: str, path: Path) -> dict[str, object]:
+    """Return cached-friendly media metadata from FFprobe."""
+    completed = subprocess.run(
+        [ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
+        text=True, capture_output=True, check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(completed.stderr.strip() or "ffprobe failed")
+    try:
+        payload = json.loads(completed.stdout)
+        streams = payload.get("streams", [])
+        video = next((item for item in streams if item.get("codec_type") == "video"), None)
+        if not isinstance(video, dict):
+            raise ValueError("video stream is missing")
+        duration = float(payload.get("format", {}).get("duration", 0))
+        fps_text = str(video.get("avg_frame_rate", "0/1"))
+        numerator, denominator = fps_text.split("/", 1)
+        fps = float(numerator) / float(denominator) if float(denominator) else 0.0
+        return {"duration": duration, "width": int(video.get("width", 0)),
+                "height": int(video.get("height", 0)), "fps": fps,
+                "codec": str(video.get("codec_name", "")),
+                "has_audio": any(item.get("codec_type") == "audio" for item in streams)}
+    except (KeyError, TypeError, ValueError, ZeroDivisionError, json.JSONDecodeError) as error:
+        raise RuntimeError("ffprobe metadata is invalid") from error
+
+
 def validate_output_media(
     ffprobe: str, path: Path, expected_duration: float
 ) -> None:

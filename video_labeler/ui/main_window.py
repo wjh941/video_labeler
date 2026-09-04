@@ -68,13 +68,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..csv_io import read_clip_csv, write_clip_csv
+from ..csv_io import (
+    read_clip_csv,
+    read_full_clip_csv,
+    write_clip_csv,
+    write_full_clip_csv,
+)
+from ..project_validation import validate_project
+from ..project_statistics import calculate_project_statistics
+from ..project_v2 import load_project_v2, save_project_v2
+from ..media_locator import relocate_media_paths
 from ..dataset_io import write_clip_jsonl, write_clip_yolo
 from ..export_worker import ExportSummary, ExportWorker
 from ..ffmpeg_service import (
     cleanup_orphaned_temporary_outputs,
     find_orphaned_temporary_outputs,
     format_seconds,
+    probe_media_metadata,
     resolve_ffmpeg,
     resolve_ffprobe,
 )
@@ -776,6 +786,11 @@ class MainWindow(QMainWindow):
         self.project_menu = self.menuBar().addMenu("工程")
         self.import_preannotation_action = QAction("导入预标注 JSON", self)
         self.export_dataset_action = QAction("导出数据集", self)
+        self.export_full_csv_action = QAction("导出完整标注 CSV", self)
+        self.import_full_csv_action = QAction("导入完整标注 CSV", self)
+        self.validate_project_action = QAction("检查工程质量", self)
+        self.statistics_action = QAction("查看工程统计", self)
+        self.relocate_media_action = QAction("定位缺失视频", self)
         self.new_project_action = QAction("新建工程", self)
         self.open_project_action = QAction("打开工程", self)
         self.save_project_action = QAction("保存工程", self)
@@ -787,6 +802,11 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.save_project_action)
         self.project_menu.addAction(self.import_preannotation_action)
         self.project_menu.addAction(self.export_dataset_action)
+        self.project_menu.addAction(self.export_full_csv_action)
+        self.project_menu.addAction(self.import_full_csv_action)
+        self.project_menu.addAction(self.validate_project_action)
+        self.project_menu.addAction(self.statistics_action)
+        self.project_menu.addAction(self.relocate_media_action)
         self.project_menu.addSeparator()
         self.project_menu.addAction(self.save_version_action)
         self.project_menu.addAction(self.restore_version_action)
@@ -1585,6 +1605,11 @@ class MainWindow(QMainWindow):
         self.restore_version_action.triggered.connect(
             self.restore_project_from_version
         )
+        self.relocate_media_action.triggered.connect(self.relocate_missing_media)
+        self.export_full_csv_action.triggered.connect(self.save_full_csv)
+        self.import_full_csv_action.triggered.connect(self.import_full_csv)
+        self.validate_project_action.triggered.connect(self.show_project_validation)
+        self.statistics_action.triggered.connect(self.show_project_statistics)
         self.hotkey_settings_action.triggered.connect(
             self.show_hotkey_settings
         )
@@ -1783,9 +1808,19 @@ class MainWindow(QMainWindow):
 
     def set_source_path(self, path: Path) -> None:
         entry = add_or_activate_video(self.project, path)
+        self._probe_video_metadata(entry)
         self._bind_active_video(entry)
         self._mark_project_dirty()
         self._set_status(f"已选择视频：{entry.path.name}")
+
+    def _probe_video_metadata(self, entry: ProjectVideo) -> None:
+        if not entry.path.is_file() or entry.metadata:
+            return
+        try:
+            ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
+            entry.metadata = probe_media_metadata(resolve_ffprobe(ffmpeg), entry.path)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._set_status(f"读取视频元数据失败：{self._file_error_tip(error)}")
 
     def _bind_active_video(self, entry: ProjectVideo) -> None:
         self.project.active_video_id = entry.id
@@ -1966,7 +2001,7 @@ class MainWindow(QMainWindow):
                 return
             project_path = Path(filename)
         try:
-            self._project_path = write_label_project(
+            self._project_path = save_project_v2(
                 project_path, self._project_snapshot()
             )
         except (OSError, ValueError) as error:
@@ -2059,7 +2094,7 @@ class MainWindow(QMainWindow):
 
     def _load_project_path(self, path: Path) -> bool:
         try:
-            project = load_project(path)
+            project = load_project_v2(path)
         except (OSError, ValueError) as error:
             self._show_error(
                 "无法打开工程", f"打开工程失败：{self._file_error_tip(error)}"
@@ -2117,6 +2152,33 @@ class MainWindow(QMainWindow):
             source_path = csv_path.parent / source_path
         normalized_path = source_path.resolve(strict=False)
         return normalized_path, str(normalized_path).casefold()
+
+    def relocate_missing_media(self) -> None:
+        missing = [video.path for video in self.project.videos if not video.path.is_file()]
+        if not missing:
+            QMessageBox.information(self, "定位缺失视频", "当前工程没有缺失的视频源。")
+            return
+        directory = QFileDialog.getExistingDirectory(
+            self, "选择素材搜索目录", "",
+            options=QFileDialog.Option.ShowDirsOnly,
+        )
+        if not directory:
+            return
+        replacements = relocate_media_paths(missing, Path(directory))
+        if not replacements:
+            self._show_error("未找到视频", "没有找到唯一匹配的缺失视频文件。")
+            return
+        for video in self.project.videos:
+            replacement = replacements.get(video.path)
+            if replacement is not None:
+                video.path = replacement
+        active = self._active_project_video()
+        if active is not None:
+            self._bind_active_video(active)
+            if active.path.is_file():
+                self._set_media_source(active.path)
+        self._mark_project_dirty()
+        self._set_status(f"已重新定位 {len(replacements)} 个视频源")
 
     def open_video(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -2359,6 +2421,84 @@ class MainWindow(QMainWindow):
         self._mark_project_dirty()
         self._update_history_controls()
         self._set_status(f"已导入 {len(imported)} 个待复核预标注片段")
+
+    def save_full_csv(self) -> None:
+        if not self.records:
+            self._show_error("没有片段任务", "导出完整 CSV 前请至少添加一个片段。")
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出完整标注 CSV", "clips-full.csv", "CSV 文件 (*.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename:
+            return
+        try:
+            write_full_clip_csv(Path(filename), self.records)
+        except (OSError, ValueError) as error:
+            self._show_error("无法导出完整 CSV", f"导出失败：{self._file_error_tip(error)}")
+            return
+        self._set_status(f"已导出完整标注 CSV：{filename}")
+
+    def import_full_csv(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "导入完整标注 CSV", "", "CSV 文件 (*.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog,
+        )
+        if not filename:
+            return
+        try:
+            imported_records = read_full_clip_csv(Path(filename))
+        except (OSError, ValueError) as error:
+            self._show_error("无法导入完整 CSV", f"导入失败：{error}")
+            return
+        if not imported_records:
+            self._show_error("无法导入完整 CSV", "CSV 中没有可导入的片段。")
+            return
+        self._register_imported_behavior_tags(imported_records)
+        active_video = self._active_project_video()
+        if active_video is None:
+            source = Path(imported_records[0].source)
+            active_video = add_or_activate_video(self.project, source)
+        self.records = list(imported_records)
+        active_video.segments[:] = self.records
+        self.source_name = self.records[0].source
+        self.source_label.setText(self.source_name)
+        self._active_video_histories.pop(active_video.id, None)
+        self._editing_index = None
+        self._refresh_table()
+        self._mark_project_dirty()
+        self._update_history_controls()
+        self._set_status(f"已导入 {len(self.records)} 个完整标注片段")
+
+    def show_project_statistics(self) -> None:
+        stats = calculate_project_statistics(self.project)
+        status_text = "、".join(
+            f"{STATUS_LABELS.get(key, key)} {value}" for key, value in stats.status_counts.items()
+        ) or "无"
+        behavior_text = "、".join(
+            f"{key} {value}" for key, value in stats.behavior_counts.items()
+        ) or "无"
+        QMessageBox.information(
+            self,
+            "工程统计",
+            (f"视频数量：{stats.video_count}\n片段数量：{stats.segment_count}\n"
+             f"标注时长：{format_seconds(stats.total_duration)}\n"
+             f"正样本：{stats.positive_count}，负样本：{stats.negative_count}，未设置：{stats.unlabeled_count}\n"
+             f"导出状态：{status_text}\n行为标签：{behavior_text}"),
+        )
+
+    def show_project_validation(self) -> None:
+        issues = validate_project(self.project)
+        if not issues:
+            QMessageBox.information(self, "工程质量检查", "未发现问题。")
+            self._set_status("工程质量检查通过")
+            return
+        lines = []
+        for issue in issues:
+            location = f"视频 {issue.video_id}，片段 {issue.segment_index + 1}" if issue.segment_index is not None else f"视频 {issue.video_id}"
+            lines.append(f"[{issue.severity}] {location}：{issue.message}")
+        QMessageBox.warning(self, "工程质量检查", "\n".join(lines))
+        self._set_status(f"工程质量检查发现 {len(issues)} 个问题")
 
     def save_csv(self) -> None:
         if not self.records:

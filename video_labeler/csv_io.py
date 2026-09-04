@@ -1,4 +1,5 @@
 import csv
+import json
 import math
 from pathlib import Path
 from typing import Sequence
@@ -9,6 +10,10 @@ from .naming import parse_filename
 
 CSV_REQUIRED_FIELDS = ("source", "start", "end", "output")
 CSV_FIELDS = (*CSV_REQUIRED_FIELDS, "note")
+FULL_CSV_FIELDS = (
+    "source", "start_seconds", "end_seconds", "output", "behaviors",
+    "polarity", "lighting", "sequence", "status", "error", "note"
+)
 
 
 def _parse_seconds(value: str) -> float:
@@ -55,6 +60,56 @@ def write_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                     "note": record.note,
                 }
             )
+
+
+def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
+    """Write a lossless interchange CSV containing every clip field."""
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=FULL_CSV_FIELDS)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({
+                "source": record.source,
+                "start_seconds": record.start_seconds,
+                "end_seconds": record.end_seconds,
+                "output": record.output,
+                "behaviors": json.dumps(list(record.behaviors), ensure_ascii=False),
+                "polarity": record.polarity,
+                "lighting": record.lighting,
+                "sequence": record.sequence,
+                "status": record.status,
+                "error": record.error,
+                "note": record.note,
+            })
+
+
+def read_full_clip_csv(path: Path) -> list[ClipRecord]:
+    """Read the lossless interchange CSV without relying on filenames."""
+    import json
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        if set(FULL_CSV_FIELDS) - set(reader.fieldnames or ()):
+            raise ValueError("full CSV missing columns")
+        records = []
+        for index, row in enumerate(reader, start=2):
+            try:
+                start = float(row["start_seconds"])
+                end = float(row["end_seconds"])
+                behaviors = json.loads(row["behaviors"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError(f"full CSV row {index} is invalid") from error
+            if not math.isfinite(start) or not math.isfinite(end) or end <= start:
+                raise ValueError(f"full CSV row {index} has an invalid time range")
+            if not isinstance(behaviors, list) or not all(isinstance(tag, str) for tag in behaviors):
+                raise ValueError(f"full CSV row {index} behaviors must be a JSON list")
+            records.append(ClipRecord(
+                source=row["source"], start_seconds=start, end_seconds=end,
+                output=row["output"], behaviors=tuple(behaviors),
+                polarity=row["polarity"], lighting=row["lighting"],
+                sequence=int(row["sequence"]), status=row["status"],
+                error=row["error"], note=row["note"],
+            ))
+    return records
 
 
 def read_clip_csv(path: Path) -> list[ClipRecord]:
