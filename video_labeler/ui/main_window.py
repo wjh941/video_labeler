@@ -76,6 +76,7 @@ from ..csv_io import (
 )
 from ..project_validation import validate_project
 from ..project_statistics import calculate_project_statistics
+from ..report_io import write_project_statistics_report
 from ..project_v2 import load_project_v2, save_project_v2
 from ..media_locator import relocate_media_paths
 from ..dataset_io import write_clip_jsonl, write_clip_yolo
@@ -790,6 +791,7 @@ class MainWindow(QMainWindow):
         self.import_full_csv_action = QAction("导入完整标注 CSV", self)
         self.validate_project_action = QAction("检查工程质量", self)
         self.statistics_action = QAction("查看工程统计", self)
+        self.export_statistics_action = QAction("导出工程统计 JSON", self)
         self.relocate_media_action = QAction("定位缺失视频", self)
         self.new_project_action = QAction("新建工程", self)
         self.open_project_action = QAction("打开工程", self)
@@ -806,6 +808,7 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.import_full_csv_action)
         self.project_menu.addAction(self.validate_project_action)
         self.project_menu.addAction(self.statistics_action)
+        self.project_menu.addAction(self.export_statistics_action)
         self.project_menu.addAction(self.relocate_media_action)
         self.project_menu.addSeparator()
         self.project_menu.addAction(self.save_version_action)
@@ -1620,6 +1623,7 @@ class MainWindow(QMainWindow):
         self.import_full_csv_action.triggered.connect(self.import_full_csv)
         self.validate_project_action.triggered.connect(self.show_project_validation)
         self.statistics_action.triggered.connect(self.show_project_statistics)
+        self.export_statistics_action.triggered.connect(self.export_project_statistics)
         self.hotkey_settings_action.triggered.connect(
             self.show_hotkey_settings
         )
@@ -2501,6 +2505,20 @@ class MainWindow(QMainWindow):
              f"正样本：{stats.positive_count}，负样本：{stats.negative_count}，未设置：{stats.unlabeled_count}\n"
              f"导出状态：{status_text}\n行为标签：{behavior_text}"),
         )
+
+    def export_project_statistics(self) -> None:
+        default_name = "project-statistics.json"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "导出工程统计", default_name, "JSON 文件 (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            target = write_project_statistics_report(Path(filename), self.project)
+        except OSError as error:
+            self._show_error("无法导出工程统计", f"导出失败：{self._file_error_tip(error)}")
+            return
+        self._set_status(f"已导出工程统计：{target.name}")
 
     def show_project_validation(self) -> None:
         issues = validate_project(self.project)
