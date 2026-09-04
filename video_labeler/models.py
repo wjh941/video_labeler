@@ -38,3 +38,4 @@ class ClipRecord:
     status: str = "queued"
     error: str = ""
     note: str = ""
+    review_status: str = "pending"

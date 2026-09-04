@@ -12,7 +12,7 @@ CSV_REQUIRED_FIELDS = ("source", "start", "end", "output")
 CSV_FIELDS = (*CSV_REQUIRED_FIELDS, "note")
 FULL_CSV_FIELDS = (
     "source", "start_seconds", "end_seconds", "output", "behaviors",
-    "polarity", "lighting", "sequence", "status", "error", "note"
+    "polarity", "lighting", "sequence", "status", "error", "note", "review_status"
 )
 
 
@@ -80,6 +80,7 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                 "status": record.status,
                 "error": record.error,
                 "note": record.note,
+                "review_status": record.review_status,
             })
 
 
@@ -102,12 +103,16 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 raise ValueError(f"full CSV row {index} has an invalid time range")
             if not isinstance(behaviors, list) or not all(isinstance(tag, str) for tag in behaviors):
                 raise ValueError(f"full CSV row {index} behaviors must be a JSON list")
+            review_status = row.get("review_status") or "pending"
+            if review_status not in {"pending", "approved", "rejected"}:
+                raise ValueError(f"full CSV row {index} has an invalid review status")
             records.append(ClipRecord(
                 source=row["source"], start_seconds=start, end_seconds=end,
                 output=row["output"], behaviors=tuple(behaviors),
                 polarity=row["polarity"], lighting=row["lighting"],
                 sequence=int(row["sequence"]), status=row["status"],
                 error=row["error"], note=row["note"],
+                review_status=review_status,
             ))
     return records
 

@@ -1334,6 +1334,8 @@ class MainWindow(QMainWindow):
         self.batch_edit_button = QPushButton("批量修改选中片段")
         self.batch_delete_button = QPushButton("批量删除选中")
         self.batch_delete_button.setObjectName("dangerButton")
+        self.approve_selected_button = QPushButton("批量通过审核")
+        self.reject_selected_button = QPushButton("批量驳回审核")
         self.behavior_filter_combo = QComboBox()
         self.behavior_filter_combo.addItem("全部行为", None)
         for behavior in BEHAVIOR_LABELS:
@@ -1356,6 +1358,11 @@ class MainWindow(QMainWindow):
         self.status_filter_combo.addItem("全部导出状态", None)
         for status, label in STATUS_LABELS.items():
             self.status_filter_combo.addItem(label, status)
+        self.review_filter_combo = QComboBox()
+        self.review_filter_combo.addItem("全部审核状态", None)
+        self.review_filter_combo.addItem("待审核", "pending")
+        self.review_filter_combo.addItem("已通过", "approved")
+        self.review_filter_combo.addItem("已驳回", "rejected")
         self.sort_combo = QComboBox()
         self.sort_combo.addItem("编号升序", ("sequence", False))
         self.sort_combo.addItem("编号降序", ("sequence", True))
@@ -1393,6 +1400,7 @@ class MainWindow(QMainWindow):
         secondary_filter_layout.setContentsMargins(0, 0, 0, 0)
         secondary_filter_layout.setSpacing(8)
         secondary_filter_layout.addWidget(self.status_filter_combo, stretch=1)
+        secondary_filter_layout.addWidget(self.review_filter_combo, stretch=1)
         secondary_filter_layout.addWidget(QLabel("排序"))
         secondary_filter_layout.addWidget(self.sort_combo, stretch=1)
         secondary_filter_layout.addWidget(self.clear_filters_button)
@@ -1406,6 +1414,8 @@ class MainWindow(QMainWindow):
         action_layout.setSpacing(8)
         action_layout.addWidget(self.batch_edit_button)
         action_layout.addWidget(self.batch_delete_button)
+        action_layout.addWidget(self.approve_selected_button)
+        action_layout.addWidget(self.reject_selected_button)
         action_layout.addStretch(1)
         self.detach_table_button = QPushButton("弹出表格")
         self.detach_table_button.setObjectName("secondaryButton")
@@ -1680,6 +1690,8 @@ class MainWindow(QMainWindow):
         self.clear_button.clicked.connect(self.clear_editor)
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
+        self.approve_selected_button.clicked.connect(lambda: self._set_selected_review_status("approved"))
+        self.reject_selected_button.clicked.connect(lambda: self._set_selected_review_status("rejected"))
         self.detach_table_button.clicked.connect(self._show_task_table_dialog)
         self.behavior_filter_combo.currentIndexChanged.connect(
             self._apply_table_filters
@@ -1688,6 +1700,9 @@ class MainWindow(QMainWindow):
             self._apply_table_filters
         )
         self.status_filter_combo.currentIndexChanged.connect(
+            self._apply_table_filters
+        )
+        self.review_filter_combo.currentIndexChanged.connect(
             self._apply_table_filters
         )
         self.search_edit.textChanged.connect(self._apply_table_filters)
@@ -3091,6 +3106,7 @@ class MainWindow(QMainWindow):
             self.behavior_filter_combo,
             self.polarity_filter_combo,
             self.status_filter_combo,
+            self.review_filter_combo,
             self.sort_combo,
         ):
             self._set_combo_visible_item_count(combo)
@@ -3099,6 +3115,7 @@ class MainWindow(QMainWindow):
         behavior = self.behavior_filter_combo.currentData()
         polarity = self.polarity_filter_combo.currentData()
         status = self.status_filter_combo.currentData()
+        review_status = self.review_filter_combo.currentData()
         search_text = self.search_edit.text().strip().casefold()
         selection_model = self.task_table.selectionModel()
         visible_count = 0
@@ -3107,6 +3124,7 @@ class MainWindow(QMainWindow):
                 (behavior is None or behavior in record.behaviors)
                 and (polarity is None or polarity == record.polarity)
                 and (status is None or status == record.status)
+                and (review_status is None or review_status == record.review_status)
                 and (
                     not search_text
                     or search_text
@@ -3203,6 +3221,23 @@ class MainWindow(QMainWindow):
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()
+
+    def _set_selected_review_status(self, review_status: str) -> None:
+        if review_status not in {"pending", "approved", "rejected"}:
+            raise ValueError("审核状态无效")
+        indexes = self._selected_record_indexes()
+        if not indexes:
+            self._show_error("未选择片段", "请先选择至少一个片段。")
+            return
+        before = list(self.records)
+        for index in indexes:
+            self.records[index].review_status = review_status
+        self._refresh_table()
+        self._mark_project_dirty()
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self._set_status(f"已将 {len(indexes)} 个片段标记为{review_status}")
 
     def _selected_record_indexes(self) -> list[int]:
         return sorted(

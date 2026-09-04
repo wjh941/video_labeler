@@ -324,8 +324,8 @@ def _write_json_atomic(path: Path, document: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _record_to_dict(record: ClipRecord) -> dict[str, Any]:
-    return {
+def _record_to_dict(record: ClipRecord, *, include_review: bool = False) -> dict[str, Any]:
+    document = {
         "source": record.source,
         "start_seconds": record.start_seconds,
         "end_seconds": record.end_seconds,
@@ -338,6 +338,10 @@ def _record_to_dict(record: ClipRecord) -> dict[str, Any]:
         "error": record.error,
         "note": record.note,
     }
+    if include_review:
+        document["review_status"] = record.review_status
+    return document
+
 
 
 def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
@@ -353,6 +357,7 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         status=document["status"],
         error=document["error"],
         note=document.get("note", ""),
+        review_status=document.get("review_status", "pending"),
     )
 
 
@@ -533,7 +538,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "status",
         "error",
     }
-    optional_keys = {"note"}
+    optional_keys = {"note", "review_status"}
     if (
         not isinstance(document, dict)
         or not required_keys.issubset(document)
@@ -548,6 +553,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "status",
         "error",
         "note",
+        "review_status",
     ):
         if not isinstance(document.get(key, ""), str):
             raise ValueError(f"segment {key} must be a string")
@@ -562,6 +568,9 @@ def _validated_record(document: Any) -> dict[str, Any]:
         raise ValueError("segment behaviors must be a list of strings")
     if not _is_int(document["sequence"]):
         raise ValueError("segment sequence must be an integer")
+    review_status = document.get("review_status", "pending")
+    if review_status not in {"pending", "approved", "rejected"}:
+        raise ValueError("segment review_status is invalid")
     return {
         "source": document["source"],
         "start_seconds": float(document["start_seconds"]),
@@ -574,6 +583,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "status": document["status"],
         "error": document["error"],
         "note": document.get("note", ""),
+        "review_status": review_status,
     }
 
 

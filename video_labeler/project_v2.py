@@ -72,6 +72,7 @@ def project_to_v2_dict(
         for index, segment in enumerate(video["segments"]):
             item = dict(segment)
             item["id"] = str(uuid5(NAMESPACE_URL, f"{video['id']}:{index}"))
+            item["review_status"] = getattr(source_video.segments[index], "review_status", "pending")
             segments.append(item)
         videos.append({
             "id": video["id"],
@@ -147,6 +148,7 @@ def project_from_v2_dict(document: Any, project_path: Path) -> LabelProject:
         for segment in video.get("segments", []):
             item = dict(segment)
             item.pop("id", None)
+            item.pop("review_status", None)
             segments.append(item)
         videos.append({"id": video["id"], "path": str(path), "segments": segments})
     legacy = {
@@ -160,6 +162,8 @@ def project_from_v2_dict(document: Any, project_path: Path) -> LabelProject:
     result = project_from_dict(legacy)
     for target_video, source_video in zip(result.videos, document["videos"]):
         target_video.metadata = dict(source_video.get("metadata", {}))
+        for target_segment, source_segment in zip(target_video.segments, source_video.get("segments", [])):
+            target_segment.review_status = source_segment.get("review_status", "pending")
     return result
 
 
