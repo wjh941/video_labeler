@@ -12,7 +12,8 @@ CSV_REQUIRED_FIELDS = ("source", "start", "end", "output")
 CSV_FIELDS = (*CSV_REQUIRED_FIELDS, "note")
 FULL_CSV_FIELDS = (
     "source", "start_seconds", "end_seconds", "output", "behaviors",
-    "polarity", "lighting", "sequence", "status", "error", "note", "review_status"
+    "polarity", "lighting", "sequence", "status", "error", "note",
+    "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason"
 )
 
 
@@ -81,6 +82,10 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                 "error": record.error,
                 "note": record.note,
                 "review_status": record.review_status,
+                "reviewer": record.reviewer,
+                "reviewed_at": record.reviewed_at,
+                "review_comment": record.review_comment,
+                "rejection_reason": record.rejection_reason,
             })
 
 
@@ -113,6 +118,10 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 sequence=int(row["sequence"]), status=row["status"],
                 error=row["error"], note=row["note"],
                 review_status=review_status,
+                reviewer=row.get("reviewer", ""),
+                reviewed_at=row.get("reviewed_at", ""),
+                review_comment=row.get("review_comment", ""),
+                rejection_reason=row.get("rejection_reason", ""),
             ))
     return records
 
