@@ -75,7 +75,7 @@ from ..csv_io import (
     write_clip_csv,
     write_full_clip_csv,
 )
-from ..project_validation import validate_project
+from ..project_validation import validate_project, export_quality_issues
 from ..project_statistics import calculate_project_statistics
 from ..report_io import write_project_statistics_report
 from ..builtin_exporters import register_builtin_exporters
@@ -2674,7 +2674,11 @@ class MainWindow(QMainWindow):
         if not directory:
             return
         try:
-            export_with(get_exporter(name), self.records, Path(directory))
+            prepared = self._prepare_export_records(self.records, [self.source_path] * len(self.records) if self.source_path else [Path(record.source) for record in self.records])
+            if prepared is None:
+                return
+            export_records, _ = prepared
+            export_with(get_exporter(name), export_records, Path(directory))
         except (OSError, RuntimeError, ValueError, KeyError) as error:
             self._show_error("插件导出失败", self._file_error_tip(error))
             return
@@ -3583,7 +3587,9 @@ class MainWindow(QMainWindow):
         if self.source_path is None or not self.source_path.is_file():
             self._show_error("没有视频源", "导出前请先导入源视频。")
             return
-        self._start_export(self.records, [self.source_path] * len(self.records))
+        prepared = self._prepare_export_records(self.records, [self.source_path] * len(self.records))
+        if prepared is not None:
+            self._start_export(*prepared)
 
     def start_project_export(self) -> None:
         records: list[ClipRecord] = []
@@ -3604,7 +3610,35 @@ class MainWindow(QMainWindow):
                 "以下视频源不存在：" + "；".join(missing_sources),
             )
             return
-        self._start_export(records, input_paths, project_queue=True)
+        prepared = self._prepare_export_records(records, input_paths)
+        if prepared is not None:
+            filtered_records, filtered_paths = prepared
+            self._start_export(filtered_records, filtered_paths, project_queue=True)
+
+    def _prepare_export_records(self, records, input_paths):
+        policy, accepted = QInputDialog.getItem(
+            self, "导出审核范围", "选择导出范围",
+            ("全部片段", "仅导出审核通过", "取消导出"), 0, False
+        )
+        if not accepted or policy == "取消导出":
+            self._set_status("已取消导出")
+            return None
+        if policy == "仅导出审核通过":
+            selected = [(record, path) for record, path in zip(records, input_paths) if record.review_status == "approved"]
+            if not selected:
+                self._show_error("没有已审核片段", "当前没有审核通过的片段可导出。")
+                return None
+            records, input_paths = zip(*selected)
+            records, input_paths = list(records), list(input_paths)
+        warnings = export_quality_issues(self.project, require_approved=(policy == "仅导出审核通过"))
+        blocking = [issue for issue in warnings if issue.severity == "error"]
+        if blocking:
+            text = "\n".join(issue.message for issue in blocking[:10])
+            answer = QMessageBox.warning(self, "导出质量检查", text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                self._set_status("质量检查未通过，已取消导出")
+                return None
+        return records, input_paths
 
     @staticmethod
     def _format_export_size(byte_count: int | None) -> str:
