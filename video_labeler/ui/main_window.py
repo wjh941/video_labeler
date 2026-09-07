@@ -467,6 +467,8 @@ class MainWindow(QMainWindow):
         self._button_hover_animations: dict[
             QPushButton, QPropertyAnimation
         ] = {}
+        self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
+        self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
         self.historical_behavior_tags: tuple[str, ...] = ()
         self.historical_tag_labels: dict[str, QLabel] = {}
 
@@ -613,6 +615,21 @@ class MainWindow(QMainWindow):
         button.installEventFilter(self)
         self._button_hover_effects[button] = effect
         self._button_hover_animations[button] = animation
+        press = QPropertyAnimation(button, b"geometry", button)
+        press.setDuration(150)
+        press.setEasingCurve(QEasingCurve.Type.OutBack)
+        self._button_press_animations[button] = press
+
+    def _animate_button_press(self, button: QPushButton, pressed: bool) -> None:
+        animation = self._button_press_animations.get(button)
+        if animation is None:
+            return
+        rect = button.geometry()
+        target = rect.adjusted(2, 2, -2, -2) if pressed else rect
+        animation.stop()
+        animation.setStartValue(button.geometry())
+        animation.setEndValue(target)
+        animation.start()
 
     def _animate_button_hover(self, button: QPushButton, target_blur: float) -> None:
         effect = self._button_hover_effects[button]
@@ -1290,6 +1307,10 @@ class MainWindow(QMainWindow):
                 self._animate_button_hover(watched, 13)
             elif event.type() == QEvent.Type.Leave:
                 self._animate_button_hover(watched, 0)
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                self._animate_button_press(watched, True)
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._animate_button_press(watched, False)
         if event.type() != QEvent.Type.Resize:
             return super().eventFilter(watched, event)
         if watched is getattr(self, "video_viewport", None):
