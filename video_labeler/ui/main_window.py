@@ -3317,13 +3317,22 @@ class MainWindow(QMainWindow):
             return
         before = list(self.records)
         reviewer = "local-user"
+        review_comment = ""
+        rejection_reason = ""
+        if review_status in {"approved", "rejected"}:
+            comment, accepted = QInputDialog.getText(self, "审核备注", "审核意见/驳回原因：")
+            if not accepted:
+                return
+            review_comment = comment.strip()
+            rejection_reason = review_comment if review_status == "rejected" else ""
         reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         for index in indexes:
             record = self.records[index]
             record.review_status = review_status
             record.reviewer = reviewer if review_status != "pending" else ""
             record.reviewed_at = reviewed_at if review_status != "pending" else ""
-            record.rejection_reason = "" if review_status != "rejected" else record.rejection_reason
+            record.review_comment = review_comment if review_status != "pending" else ""
+            record.rejection_reason = rejection_reason
         self._refresh_table()
         self._mark_project_dirty()
         history = self._active_history(create=True)
