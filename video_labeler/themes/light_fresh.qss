@@ -500,6 +500,40 @@ QLabel#playbackRateBadge {
 }
 
 /* Premium workspace refresh: layered surfaces, stronger hierarchy, calmer density. */
+QWidget#projectHero {
+    min-height: 58px;
+    padding: 4px 6px;
+    background: transparent;
+}
+QLabel#heroMark {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #2563eb, stop:1 #7c3aed);
+    border: 1px solid #93c5fd;
+    border-radius: 14px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 900;
+    qproperty-alignment: AlignCenter;
+}
+QLabel#heroTitle {
+    color: #0f172a;
+    font-size: 21px;
+    font-weight: 900;
+}
+QLabel#heroSubtitle {
+    color: #64748b;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+QLabel#workspaceStatusBadge {
+    padding: 6px 12px;
+    border: 1px solid #bbf7d0;
+    border-radius: 999px;
+    background: #f0fdf4;
+    color: #15803d;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 1px;
+}
 QMainWindow {
     background: #f1f5f9;
 }

@@ -468,7 +468,6 @@ class MainWindow(QMainWindow):
             QPushButton, QPropertyAnimation
         ] = {}
         self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
-        self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
         self.historical_behavior_tags: tuple[str, ...] = ()
         self.historical_tag_labels: dict[str, QLabel] = {}
 
@@ -644,8 +643,32 @@ class MainWindow(QMainWindow):
         group.setObjectName("toolbarCard")
         self.project_settings_content = QWidget()
         layout = QVBoxLayout(self.project_settings_content)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(12)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(14)
+
+        hero = QWidget()
+        hero.setObjectName("projectHero")
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(4, 2, 4, 4)
+        hero_layout.setSpacing(12)
+        hero_mark = QLabel("VL")
+        hero_mark.setObjectName("heroMark")
+        hero_mark.setFixedSize(42, 42)
+        hero_layout.addWidget(hero_mark)
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(1)
+        hero_title = QLabel("Video Labeler")
+        hero_title.setObjectName("heroTitle")
+        hero_subtitle = QLabel("Precision annotation workspace  ·  专业视频标注工作台")
+        hero_subtitle.setObjectName("heroSubtitle")
+        hero_copy.addWidget(hero_title)
+        hero_copy.addWidget(hero_subtitle)
+        hero_layout.addLayout(hero_copy)
+        hero_layout.addStretch(1)
+        self.workspace_status_badge = QLabel("READY")
+        self.workspace_status_badge.setObjectName("workspaceStatusBadge")
+        hero_layout.addWidget(self.workspace_status_badge)
+        layout.addWidget(hero)
 
         self.open_video_button = QPushButton("导入视频")
         self.import_csv_button = QPushButton("导入 CSV")
