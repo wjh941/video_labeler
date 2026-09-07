@@ -24,6 +24,9 @@ def project_statistics_to_dict(project: LabelProject) -> dict[str, Any]:
         "status_counts": stats.status_counts,
         "behavior_counts": stats.behavior_counts,
         "behavior_durations": stats.behavior_durations,
+        "review_status_counts": stats.review_status_counts,
+        "review_completion_rate": stats.review_completion_rate,
+        "review_approval_rate": stats.review_approval_rate,
     }
 
 

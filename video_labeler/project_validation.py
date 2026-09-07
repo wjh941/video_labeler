@@ -50,3 +50,13 @@ def validate_project(project: LabelProject) -> list[ValidationIssue]:
                     issues.append(ValidationIssue("overlapping_segments", f"与片段 {previous_index + 1} 时间重叠", **prefix, severity="warning"))
             previous.append((index, record))
     return issues
+
+
+def export_quality_issues(project: LabelProject, *, require_approved: bool = False) -> list[ValidationIssue]:
+    issues = validate_project(project)
+    if require_approved:
+        for video in project.videos:
+            for index, record in enumerate(video.segments):
+                if record.review_status != "approved":
+                    issues.append(ValidationIssue("not_approved", "片段尚未审核通过", video.id, index, "warning"))
+    return issues
