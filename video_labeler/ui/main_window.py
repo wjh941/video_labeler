@@ -77,6 +77,8 @@ from ..csv_io import (
 from ..project_validation import validate_project
 from ..project_statistics import calculate_project_statistics
 from ..report_io import write_project_statistics_report
+from ..builtin_exporters import register_builtin_exporters
+from ..plugin_api import list_exporters, load_plugin_file, get_exporter, export_with
 from ..project_v2 import load_project_v2, save_project_v2
 from ..media_locator import relocate_media_paths
 from ..dataset_io import write_clip_jsonl, write_clip_yolo
@@ -451,6 +453,7 @@ class MainWindow(QMainWindow):
         self._export_record_states: list[tuple[str, str]] = []
         self._project_export_queue: list[tuple[Path, ClipRecord]] = []
         self._is_project_export = False
+        register_builtin_exporters()
         self.frame_cache = FrameCache(max_bytes=64 * 1024 * 1024)
         self._hotkey_preferences_path = default_preferences_path()
         self.hotkey_bindings = load_hotkey_preferences(
@@ -792,6 +795,8 @@ class MainWindow(QMainWindow):
         self.validate_project_action = QAction("检查工程质量", self)
         self.statistics_action = QAction("查看工程统计", self)
         self.export_statistics_action = QAction("导出工程统计 JSON", self)
+        self.load_plugin_action = QAction("加载导出插件", self)
+        self.list_exporters_action = QAction("查看可用导出器", self)
         self.relocate_media_action = QAction("定位缺失视频", self)
         self.new_project_action = QAction("新建工程", self)
         self.open_project_action = QAction("打开工程", self)
@@ -809,6 +814,8 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.validate_project_action)
         self.project_menu.addAction(self.statistics_action)
         self.project_menu.addAction(self.export_statistics_action)
+        self.project_menu.addAction(self.load_plugin_action)
+        self.project_menu.addAction(self.list_exporters_action)
         self.project_menu.addAction(self.relocate_media_action)
         self.project_menu.addSeparator()
         self.project_menu.addAction(self.save_version_action)
@@ -1624,6 +1631,8 @@ class MainWindow(QMainWindow):
         self.validate_project_action.triggered.connect(self.show_project_validation)
         self.statistics_action.triggered.connect(self.show_project_statistics)
         self.export_statistics_action.triggered.connect(self.export_project_statistics)
+        self.load_plugin_action.triggered.connect(self.load_export_plugin)
+        self.list_exporters_action.triggered.connect(self.show_available_exporters)
         self.hotkey_settings_action.triggered.connect(
             self.show_hotkey_settings
         )
@@ -2519,6 +2528,24 @@ class MainWindow(QMainWindow):
             self._show_error("无法导出工程统计", f"导出失败：{self._file_error_tip(error)}")
             return
         self._set_status(f"已导出工程统计：{target.name}")
+
+    def show_available_exporters(self) -> None:
+        exporters = list_exporters()
+        text = "\n".join(f"{name}  v{version}" for name, version in exporters)
+        QMessageBox.information(self, "可用导出器", text or "暂无可用导出器")
+
+    def load_export_plugin(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "加载导出插件", "", "Python 插件 (*.py)"
+        )
+        if not filename:
+            return
+        try:
+            loaded = load_plugin_file(Path(filename))
+        except (ImportError, OSError, ValueError, RuntimeError) as error:
+            self._show_error("插件加载失败", str(error))
+            return
+        self._set_status("已加载导出插件：" + (", ".join(loaded) or "无新增导出器"))
 
     def show_project_validation(self) -> None:
         issues = validate_project(self.project)
