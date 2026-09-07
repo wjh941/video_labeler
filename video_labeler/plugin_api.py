@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
+import importlib.util
 
 from .models import ClipRecord
 
@@ -46,6 +47,24 @@ def get_exporter(name: str) -> ClipExporter:
 
 def list_exporters() -> tuple[tuple[str, str], ...]:
     return tuple((name, _EXPORTERS[name].version) for name in sorted(_EXPORTERS))
+
+
+def load_plugin_file(path: Path) -> tuple[str, ...]:
+    source = Path(path)
+    if source.suffix.lower() != ".py":
+        raise ValueError("plugin file must be a Python file")
+    module_name = f"video_labeler_plugin_{abs(hash(source.resolve()))}"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load plugin: {source}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    hook = getattr(module, "register", None)
+    if hook is None or not callable(hook):
+        raise ValueError("plugin must expose register()")
+    before = set(_EXPORTERS)
+    hook(register_exporter)
+    return tuple(sorted(set(_EXPORTERS) - before))
 
 
 def export_with(exporter: ClipExporter, records: Sequence[ClipRecord], destination: Path) -> None:
