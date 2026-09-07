@@ -542,7 +542,10 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "status",
         "error",
     }
-    optional_keys = {"note", "review_status"}
+    optional_keys = {
+        "note", "review_status", "reviewer", "reviewed_at",
+        "review_comment", "rejection_reason",
+    }
     if (
         not isinstance(document, dict)
         or not required_keys.issubset(document)
@@ -558,6 +561,10 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "error",
         "note",
         "review_status",
+        "reviewer",
+        "reviewed_at",
+        "review_comment",
+        "rejection_reason",
     ):
         if not isinstance(document.get(key, ""), str):
             raise ValueError(f"segment {key} must be a string")
