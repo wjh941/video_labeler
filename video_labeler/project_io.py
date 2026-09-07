@@ -358,6 +358,10 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         error=document["error"],
         note=document.get("note", ""),
         review_status=document.get("review_status", "pending"),
+        reviewer=document.get("reviewer", ""),
+        reviewed_at=document.get("reviewed_at", ""),
+        review_comment=document.get("review_comment", ""),
+        rejection_reason=document.get("rejection_reason", ""),
     )
 
 

@@ -1,5 +1,6 @@
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -3315,8 +3316,14 @@ class MainWindow(QMainWindow):
             self._show_error("未选择片段", "请先选择至少一个片段。")
             return
         before = list(self.records)
+        reviewer = "local-user"
+        reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         for index in indexes:
-            self.records[index].review_status = review_status
+            record = self.records[index]
+            record.review_status = review_status
+            record.reviewer = reviewer if review_status != "pending" else ""
+            record.reviewed_at = reviewed_at if review_status != "pending" else ""
+            record.rejection_reason = "" if review_status != "rejected" else record.rejection_reason
         self._refresh_table()
         self._mark_project_dirty()
         history = self._active_history(create=True)

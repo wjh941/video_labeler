@@ -39,3 +39,7 @@ class ClipRecord:
     error: str = ""
     note: str = ""
     review_status: str = "pending"
+    reviewer: str = ""
+    reviewed_at: str = ""
+    review_comment: str = ""
+    rejection_reason: str = ""

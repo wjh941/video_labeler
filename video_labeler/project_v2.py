@@ -73,6 +73,10 @@ def project_to_v2_dict(
             item = dict(segment)
             item["id"] = str(uuid5(NAMESPACE_URL, f"{video['id']}:{index}"))
             item["review_status"] = getattr(source_video.segments[index], "review_status", "pending")
+            item["reviewer"] = getattr(source_video.segments[index], "reviewer", "")
+            item["reviewed_at"] = getattr(source_video.segments[index], "reviewed_at", "")
+            item["review_comment"] = getattr(source_video.segments[index], "review_comment", "")
+            item["rejection_reason"] = getattr(source_video.segments[index], "rejection_reason", "")
             segments.append(item)
         videos.append({
             "id": video["id"],
@@ -164,6 +168,10 @@ def project_from_v2_dict(document: Any, project_path: Path) -> LabelProject:
         target_video.metadata = dict(source_video.get("metadata", {}))
         for target_segment, source_segment in zip(target_video.segments, source_video.get("segments", [])):
             target_segment.review_status = source_segment.get("review_status", "pending")
+            target_segment.reviewer = source_segment.get("reviewer", "")
+            target_segment.reviewed_at = source_segment.get("reviewed_at", "")
+            target_segment.review_comment = source_segment.get("review_comment", "")
+            target_segment.rejection_reason = source_segment.get("rejection_reason", "")
     return result
 
 
