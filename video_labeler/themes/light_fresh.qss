@@ -218,9 +218,28 @@ QPushButton#addClipButton {
 
 QPushButton#primaryButton:hover,
 QPushButton#addClipButton:hover {
-    background: #4096ff;
-    border-color: #4096ff;
+    background: #1d4ed8;
+    border-color: #1d4ed8;
     color: #ffffff;
+}
+QPushButton#primaryButton:pressed,
+QPushButton#addClipButton:pressed {
+    background: #1e40af;
+    border-color: #1e40af;
+    padding-top: 8px;
+}
+QPushButton#primaryButton:disabled,
+QPushButton#addClipButton:disabled {
+    background: #bfdbfe;
+    border-color: #bfdbfe;
+    color: #eff6ff;
+}
+QPushButton#secondaryButton:hover,
+QPushButton#undoButton:hover,
+QPushButton#redoButton:hover {
+    background: #e0f2fe;
+    border-color: #38bdf8;
+    color: #0369a1;
 }
 
 QPushButton#dangerButton {
@@ -297,8 +316,21 @@ QComboBox QAbstractItemView {
 
 QComboBox QAbstractItemView::item {
     min-height: 29px;
-    padding: 3px 9px;
+    padding: 6px 10px;
 }
+QScrollBar:vertical {
+    width: 10px;
+    margin: 3px 1px 3px 1px;
+    background: transparent;
+}
+QScrollBar::handle:vertical {
+    min-height: 42px;
+    border-radius: 5px;
+    background: #cbd5e1;
+}
+QScrollBar::handle:vertical:hover { background: #94a3b8; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; border: 0; }
 
 QCheckBox {
     color: #4e5969;
@@ -524,6 +556,20 @@ QLabel#heroSubtitle {
     font-size: 11px;
     letter-spacing: 0.5px;
 }
+QWidget#videoInfoPanel {
+    background: #f8fafc;
+    border: 1px solid #dbe4ef;
+    border-radius: 11px;
+}
+QLabel#videoInfoTitle {
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 800;
+}
+QLabel#videoInfoMeta {
+    color: #64748b;
+    font-size: 11px;
+}
 QLabel#workspaceStatusBadge {
     padding: 6px 12px;
     border: 1px solid #bbf7d0;
@@ -625,6 +671,28 @@ QPushButton#addClipButton {
 QPushButton#primaryButton:hover,
 QPushButton#addClipButton:hover {
     background: #1d4ed8;
+    border-color: #1d4ed8;
+    padding-top: 6px;
+}
+QPushButton:pressed {
+    background: #dbeafe;
+    border-color: #2563eb;
+    padding-top: 8px;
+}
+QPushButton:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 2px;
+}
+QPushButton#primaryButton:pressed,
+QPushButton#addClipButton:pressed {
+    background: #1e40af;
+    border-color: #1e40af;
+    padding-top: 9px;
+}
+QPushButton#primaryButton:disabled,
+QPushButton#addClipButton:disabled {
+    background: #bfdbfe;
+    color: #eff6ff;
 }
 QPushButton#dangerButton {
     background: #fff1f2;

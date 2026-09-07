@@ -622,14 +622,16 @@ class MainWindow(QMainWindow):
         self._button_press_animations[button] = press
 
     def _animate_button_press(self, button: QPushButton, pressed: bool) -> None:
+        """Give physical press feedback without fighting the layout manager."""
+        effect = self._button_hover_effects.get(button)
         animation = self._button_press_animations.get(button)
-        if animation is None:
+        if effect is None or animation is None:
             return
-        rect = button.geometry()
-        target = rect.adjusted(2, 2, -2, -2) if pressed else rect
+        animation.setTargetObject(effect)
+        animation.setPropertyName(b"blurRadius")
         animation.stop()
-        animation.setStartValue(button.geometry())
-        animation.setEndValue(target)
+        animation.setStartValue(effect.blurRadius())
+        animation.setEndValue(19 if pressed else 10)
         animation.start()
 
     def _animate_button_hover(self, button: QPushButton, target_blur: float) -> None:
