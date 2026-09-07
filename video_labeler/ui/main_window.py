@@ -78,7 +78,7 @@ from ..project_validation import validate_project
 from ..project_statistics import calculate_project_statistics
 from ..report_io import write_project_statistics_report
 from ..builtin_exporters import register_builtin_exporters
-from ..plugin_api import list_exporters, load_plugin_file, get_exporter, export_with
+from ..plugin_api import list_exporters, load_plugin_file, load_plugin_directory, get_exporter, export_with
 from ..project_v2 import load_project_v2, save_project_v2
 from ..media_locator import relocate_media_paths
 from ..dataset_io import write_clip_jsonl, write_clip_yolo
@@ -797,6 +797,7 @@ class MainWindow(QMainWindow):
         self.export_statistics_action = QAction("导出工程统计 JSON", self)
         self.load_plugin_action = QAction("加载导出插件", self)
         self.list_exporters_action = QAction("查看可用导出器", self)
+        self.scan_plugins_action = QAction("扫描插件目录", self)
         self.relocate_media_action = QAction("定位缺失视频", self)
         self.new_project_action = QAction("新建工程", self)
         self.open_project_action = QAction("打开工程", self)
@@ -816,6 +817,7 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.export_statistics_action)
         self.project_menu.addAction(self.load_plugin_action)
         self.project_menu.addAction(self.list_exporters_action)
+        self.project_menu.addAction(self.scan_plugins_action)
         self.project_menu.addAction(self.relocate_media_action)
         self.project_menu.addSeparator()
         self.project_menu.addAction(self.save_version_action)
@@ -1633,6 +1635,7 @@ class MainWindow(QMainWindow):
         self.export_statistics_action.triggered.connect(self.export_project_statistics)
         self.load_plugin_action.triggered.connect(self.load_export_plugin)
         self.list_exporters_action.triggered.connect(self.show_available_exporters)
+        self.scan_plugins_action.triggered.connect(self.scan_plugin_directory)
         self.hotkey_settings_action.triggered.connect(
             self.show_hotkey_settings
         )
@@ -2533,6 +2536,17 @@ class MainWindow(QMainWindow):
         exporters = list_exporters()
         text = "\n".join(f"{name}  v{version}" for name, version in exporters)
         QMessageBox.information(self, "可用导出器", text or "暂无可用导出器")
+
+    def scan_plugin_directory(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "扫描插件目录")
+        if not directory:
+            return
+        try:
+            loaded = load_plugin_directory(Path(directory))
+        except (ImportError, OSError, ValueError, RuntimeError) as error:
+            self._show_error("插件扫描失败", str(error))
+            return
+        self._set_status("已扫描插件目录：" + (", ".join(loaded) or "无新增导出器"))
 
     def load_export_plugin(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(

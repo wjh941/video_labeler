@@ -49,6 +49,18 @@ def list_exporters() -> tuple[tuple[str, str], ...]:
     return tuple((name, _EXPORTERS[name].version) for name in sorted(_EXPORTERS))
 
 
+def load_plugin_directory(directory: Path) -> tuple[str, ...]:
+    root = Path(directory)
+    if not root.is_dir():
+        raise NotADirectoryError(str(root))
+    loaded: list[str] = []
+    for source in sorted(root.glob("*.py")):
+        if source.name.startswith("_"):
+            continue
+        loaded.extend(load_plugin_file(source))
+    return tuple(dict.fromkeys(loaded))
+
+
 def load_plugin_file(path: Path) -> tuple[str, ...]:
     source = Path(path)
     if source.suffix.lower() != ".py":
