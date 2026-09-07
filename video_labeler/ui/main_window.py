@@ -530,8 +530,7 @@ class MainWindow(QMainWindow):
         self.task_panel._animation.finished.connect(
             self._restore_task_table_content_minimum
         )
-        self.annotation_workspace_layout.addWidget(self.annotation_panel, 5)
-        self.annotation_workspace_layout.addWidget(self.task_panel, 7)
+        self.annotation_workspace_layout.addWidget(self.annotation_panel)
 
         workspace_layout.addWidget(self.video_panel, 15)
         workspace_layout.addWidget(self.annotation_workspace, 10)
@@ -544,7 +543,8 @@ class MainWindow(QMainWindow):
         self.task_table_dialog.setLayout(QVBoxLayout())
         self.task_table_dialog.finished.connect(self._restore_task_panel)
 
-        self.page_layout.addWidget(self.workspace_row, 1)
+        self.page_layout.addWidget(self.workspace_row)
+        self.page_layout.addWidget(self.task_panel)
         self.operation_log_group = self._build_log_panel()
         self.page_layout.addWidget(self.operation_log_group)
         self.page_layout.addLayout(self._build_export_status())
