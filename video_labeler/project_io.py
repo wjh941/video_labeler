@@ -362,6 +362,7 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         reviewed_at=document.get("reviewed_at", ""),
         review_comment=document.get("review_comment", ""),
         rejection_reason=document.get("rejection_reason", ""),
+        review_history=[dict(item) for item in document.get("review_history", [])],
     )
 
 
@@ -544,7 +545,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
     }
     optional_keys = {
         "note", "review_status", "reviewer", "reviewed_at",
-        "review_comment", "rejection_reason",
+        "review_comment", "rejection_reason", "review_history",
     }
     if (
         not isinstance(document, dict)
@@ -566,6 +567,9 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "review_comment",
         "rejection_reason",
     ):
+        history = document.get("review_history", [])
+        if not isinstance(history, list) or not all(isinstance(item, dict) for item in history):
+            raise ValueError("segment review_history must be a list of objects")
         if not isinstance(document.get(key, ""), str):
             raise ValueError(f"segment {key} must be a string")
     for key in ("start_seconds", "end_seconds"):

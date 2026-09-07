@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 BEHAVIOR_LABELS = (
@@ -43,3 +43,4 @@ class ClipRecord:
     reviewed_at: str = ""
     review_comment: str = ""
     rejection_reason: str = ""
+    review_history: list[dict[str, str]] = field(default_factory=list)

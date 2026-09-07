@@ -3337,6 +3337,13 @@ class MainWindow(QMainWindow):
             record.reviewed_at = reviewed_at if review_status != "pending" else ""
             record.review_comment = review_comment if review_status != "pending" else ""
             record.rejection_reason = rejection_reason
+            record.review_history.append({
+                "status": review_status,
+                "reviewer": record.reviewer,
+                "reviewed_at": record.reviewed_at,
+                "comment": record.review_comment,
+                "rejection_reason": record.rejection_reason,
+            })
         self._refresh_table()
         self._mark_project_dirty()
         history = self._active_history(create=True)
