@@ -790,6 +790,7 @@ class MainWindow(QMainWindow):
         self.project_menu = self.menuBar().addMenu("工程")
         self.import_preannotation_action = QAction("导入预标注 JSON", self)
         self.export_dataset_action = QAction("导出数据集", self)
+        self.plugin_export_action = QAction("插件数据集导出", self)
         self.export_full_csv_action = QAction("导出完整标注 CSV", self)
         self.import_full_csv_action = QAction("导入完整标注 CSV", self)
         self.validate_project_action = QAction("检查工程质量", self)
@@ -810,6 +811,7 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.save_project_action)
         self.project_menu.addAction(self.import_preannotation_action)
         self.project_menu.addAction(self.export_dataset_action)
+        self.project_menu.addAction(self.plugin_export_action)
         self.project_menu.addAction(self.export_full_csv_action)
         self.project_menu.addAction(self.import_full_csv_action)
         self.project_menu.addAction(self.validate_project_action)
@@ -1617,6 +1619,7 @@ class MainWindow(QMainWindow):
         )
         self.save_csv_button.clicked.connect(self.save_csv)
         self.export_dataset_action.triggered.connect(self.export_dataset)
+        self.plugin_export_action.triggered.connect(self.export_plugin_dataset)
         self.new_project_action.triggered.connect(self.new_project)
         self.open_project_action.triggered.connect(self.open_project)
         self.save_project_action.triggered.connect(self.save_project)
@@ -2652,6 +2655,29 @@ class MainWindow(QMainWindow):
             self._show_error("无法导出 YOLO 标签", self._file_error_tip(error))
             return
         self._set_status(f"已导出 YOLO 标签：{directory}")
+
+    def export_plugin_dataset(self) -> None:
+        if not self.records:
+            self._show_error("没有片段任务", "插件导出前请至少添加一个片段。")
+            return
+        exporters = list_exporters()
+        if not exporters:
+            self._show_error("没有可用导出器", "请先加载或注册一个导出器。")
+            return
+        labels = [f"{name} v{version}" for name, version in exporters]
+        choice, accepted = QInputDialog.getItem(self, "插件数据集导出", "导出器", labels, 0, False)
+        if not accepted:
+            return
+        name = exporters[labels.index(choice)][0]
+        directory = QFileDialog.getExistingDirectory(self, "选择插件导出目录", str(self.output_dir or Path.home()))
+        if not directory:
+            return
+        try:
+            export_with(get_exporter(name), self.records, Path(directory))
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            self._show_error("插件导出失败", self._file_error_tip(error))
+            return
+        self._set_status(f"插件导出完成：{name} → {directory}")
 
     def select_output_folder(self) -> None:
         directory = QFileDialog.getExistingDirectory(
