@@ -532,8 +532,10 @@ class MainWindow(QMainWindow):
         )
         self.annotation_workspace_layout.addWidget(self.annotation_panel)
 
-        workspace_layout.addWidget(self.video_panel, 15)
-        workspace_layout.addWidget(self.annotation_workspace, 10)
+        # Keep the reference layout's most useful principle: video remains
+        # permanently visible while the annotation side has more working width.
+        workspace_layout.addWidget(self.video_panel, 11)
+        workspace_layout.addWidget(self.annotation_workspace, 13)
 
         self.task_table_dialog = QDialog(self)
         self.task_table_dialog.setWindowTitle("片段任务")
@@ -927,7 +929,20 @@ class MainWindow(QMainWindow):
         self.video_viewport = self.video_widget.viewport()
         self.video_viewport.installEventFilter(self)
         layout.addWidget(self.video_widget, stretch=1)
-        layout.addSpacing(16)
+
+        self.video_info_panel = QWidget()
+        self.video_info_panel.setObjectName("videoInfoPanel")
+        video_info_layout = QHBoxLayout(self.video_info_panel)
+        video_info_layout.setContentsMargins(12, 9, 12, 9)
+        video_info_layout.setSpacing(8)
+        self.video_info_title = QLabel("未选择视频")
+        self.video_info_title.setObjectName("videoInfoTitle")
+        self.video_info_meta = QLabel("导入视频后开始标注")
+        self.video_info_meta.setObjectName("videoInfoMeta")
+        video_info_layout.addWidget(self.video_info_title)
+        video_info_layout.addStretch(1)
+        video_info_layout.addWidget(self.video_info_meta)
+        layout.addWidget(self.video_info_panel)
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
