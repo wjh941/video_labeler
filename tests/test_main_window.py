@@ -2041,8 +2041,7 @@ def test_adding_custom_behavior_tag_partially_refreshes_editor_fields(
     assert window.behaviors_group.isChecked() is False
     assert window.polarity_combo.currentText() == "neg"
     assert window.lighting_combo.currentText() == "night_full_color"
-    assert window.lighting_group.isChecked() is False
-    assert window.polarity_group.isChecked() is False
+    assert window.scene_group.isChecked() is False
 
 
 def test_custom_field_group_lists_added_tag_for_removal(qt_app):
@@ -2063,8 +2062,7 @@ def test_adding_custom_tag_preserves_fixed_group_collapse_states(qt_app):
     window.lighting_combo.setCurrentText("night_full_color")
     window.polarity_combo.setCurrentText("neg")
     window.behaviors_group.setChecked(False)
-    window.lighting_group.setChecked(False)
-    window.polarity_group.setChecked(False)
+    window.scene_group.setChecked(False)
     window.custom_behavior_tag_edit.setText("delivery_dropoff")
 
     window.add_custom_behavior_tag()
@@ -2074,8 +2072,7 @@ def test_adding_custom_tag_preserves_fixed_group_collapse_states(qt_app):
     assert window.polarity_combo.currentText() == "neg"
     assert window.lighting_combo.currentText() == "night_full_color"
     assert not window.behaviors_group.isChecked()
-    assert not window.lighting_group.isChecked()
-    assert not window.polarity_group.isChecked()
+    assert not window.scene_group.isChecked()
 
 
 def test_loading_project_restores_custom_behavior_tag_buttons(qt_app, tmp_path):
@@ -2569,8 +2566,7 @@ def test_right_side_modules_are_collapsible_groups(qt_app):
 
     assert isinstance(window.behaviors_group, CollapsibleGroupBox)
     assert isinstance(window.custom_tags_group, CollapsibleGroupBox)
-    assert isinstance(window.lighting_group, CollapsibleGroupBox)
-    assert isinstance(window.polarity_group, CollapsibleGroupBox)
+    assert isinstance(window.scene_group, CollapsibleGroupBox)
     assert isinstance(window.task_panel, CollapsibleGroupBox)
 
 
@@ -2662,25 +2658,21 @@ def test_annotation_actions_use_primary_and_secondary_rows_without_clipping(qt_a
     )
 
 
-def test_lighting_and_polarity_use_independent_collapsible_groups(qt_app):
+def test_scene_attributes_use_a_collapsible_group(qt_app):
     window = MainWindow()
 
-    assert isinstance(window.lighting_group, QGroupBox)
-    assert isinstance(window.polarity_group, QGroupBox)
-    assert window.lighting_group.isCheckable()
-    assert window.polarity_group.isCheckable()
-    assert not window.lighting_group.isChecked()
-    assert not window.polarity_group.isChecked()
+    assert isinstance(window.scene_group, QGroupBox)
+    assert window.scene_group.isCheckable()
+    assert not window.scene_group.isChecked()
 
 
-def test_lighting_and_polarity_titles_summarize_selected_values(qt_app):
+def test_scene_group_title_summarizes_selected_values(qt_app):
     window = MainWindow()
 
     window.lighting_combo.setCurrentText("night_full_color")
     window.polarity_combo.setCurrentText("neg")
 
-    assert window.lighting_group.title() == "光照条件：night_full_color"
-    assert window.polarity_group.title() == "正负例：neg"
+    assert window.scene_group.title() == "场景属性：neg · night_full_color"
 
 
 def test_output_path_is_elided_with_a_full_path_tooltip(qt_app):
@@ -2803,8 +2795,6 @@ def test_refined_video_controls_fit_without_text_clipping(qt_app, width, height)
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
-        window.set_start_button,
-        window.set_end_button,
         window.playback_rate_badge,
         window.speed_combo,
         window.custom_speed_spin,
@@ -2880,8 +2870,6 @@ def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
-        window.set_start_button,
-        window.set_end_button,
         window.speed_combo,
     )
 
@@ -2922,8 +2910,6 @@ def test_video_progress_and_controls_use_a_dedicated_panel_below_preview(qt_app)
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
-        window.set_start_button,
-        window.set_end_button,
         window.speed_combo,
     )
 

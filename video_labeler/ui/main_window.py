@@ -1034,8 +1034,6 @@ class MainWindow(QMainWindow):
         transport_controls.addWidget(self.seek_back_button)
         transport_controls.addWidget(self.seek_forward_button)
         transport_controls.addStretch(1)
-        transport_controls.addWidget(self.set_start_button)
-        transport_controls.addWidget(self.set_end_button)
         video_controls_layout.addLayout(transport_controls)
 
         playback_rate_layout = QHBoxLayout()
@@ -1118,6 +1116,14 @@ class MainWindow(QMainWindow):
             cell_layout.addWidget(control)
             time_layout.addWidget(cell)
         layout.addLayout(time_layout)
+
+        clip_buttons = QHBoxLayout()
+        clip_buttons.setSpacing(8)
+        clip_buttons.addWidget(QLabel("截取"))
+        clip_buttons.addWidget(self.set_start_button)
+        clip_buttons.addWidget(self.set_end_button)
+        clip_buttons.addStretch(1)
+        layout.addLayout(clip_buttons)
 
         note_layout = QHBoxLayout()
         note_layout.setSpacing(8)
@@ -1272,27 +1278,6 @@ class MainWindow(QMainWindow):
         while labels_form.count():
             labels_form.takeAt(0)
 
-        self.lighting_group = CollapsibleGroupBox("光照条件")
-        self.lighting_group.setChecked(False)
-        lighting_content = QWidget()
-        lighting_form = QFormLayout(lighting_content)
-        lighting_form.addRow("光照", self.lighting_combo)
-        lighting_layout = QVBoxLayout(self.lighting_group)
-        lighting_layout.setContentsMargins(6, 6, 6, 6)
-        lighting_layout.addWidget(lighting_content)
-        self.lighting_group.set_content(lighting_content)
-        layout.addWidget(self.lighting_group)
-
-        self.polarity_group = CollapsibleGroupBox("正负例")
-        self.polarity_group.setChecked(False)
-        polarity_content = QWidget()
-        polarity_form = QFormLayout(polarity_content)
-        polarity_form.addRow("正负例", self.polarity_combo)
-        polarity_layout = QVBoxLayout(self.polarity_group)
-        polarity_layout.setContentsMargins(6, 6, 6, 6)
-        polarity_layout.addWidget(polarity_content)
-        self.polarity_group.set_content(polarity_content)
-        layout.addWidget(self.polarity_group)
         self.stratum_combo = QComboBox()
         self.stratum_combo.setToolTip(
             "简单正向=easy_pos，困难正向=hard_pos，简单负向=easy_neg，"
@@ -1301,16 +1286,24 @@ class MainWindow(QMainWindow):
         self.stratum_combo.addItem("不设置", "")
         for value in STRATUM_VALUES:
             self.stratum_combo.addItem(STRATUM_LABELS.get(value, value), value)
-        self.stratum_group = CollapsibleGroupBox("样本分层")
-        self.stratum_group.setChecked(False)
-        stratum_content = QWidget()
-        stratum_form = QFormLayout(stratum_content)
-        stratum_form.addRow("分层", self.stratum_combo)
-        stratum_layout = QVBoxLayout(self.stratum_group)
-        stratum_layout.setContentsMargins(6, 6, 6, 6)
-        stratum_layout.addWidget(stratum_content)
-        self.stratum_group.set_content(stratum_content)
-        layout.addWidget(self.stratum_group)
+
+        self.scene_group = CollapsibleGroupBox("场景属性")
+        self.scene_group.setChecked(False)
+        scene_content = QWidget()
+        scene_form = QHBoxLayout(scene_content)
+        scene_form.setContentsMargins(0, 0, 0, 0)
+        scene_form.setSpacing(8)
+        scene_form.addWidget(QLabel("正负性"))
+        scene_form.addWidget(self.polarity_combo, stretch=1)
+        scene_form.addWidget(QLabel("光照"))
+        scene_form.addWidget(self.lighting_combo, stretch=1)
+        scene_form.addWidget(QLabel("分层"))
+        scene_form.addWidget(self.stratum_combo, stretch=1)
+        scene_layout = QVBoxLayout(self.scene_group)
+        scene_layout.setContentsMargins(6, 6, 6, 6)
+        scene_layout.addWidget(scene_content)
+        self.scene_group.set_content(scene_content)
+        layout.addWidget(self.scene_group)
 
         self.events_group = CollapsibleGroupBox("样本内事件")
         self.events_group.setChecked(False)
@@ -1457,12 +1450,11 @@ class MainWindow(QMainWindow):
         self._update_filename_preview()
 
     def _update_label_group_titles(self) -> None:
-        self.lighting_group.setTitle(
-            f"光照条件：{self.lighting_combo.currentText()}"
-        )
-        self.polarity_group.setTitle(
-            f"正负例：{self.polarity_combo.currentText()}"
-        )
+        if hasattr(self, "scene_group"):
+            self.scene_group.setTitle(
+                f"场景属性：{self.polarity_combo.currentText()} · "
+                f"{self.lighting_combo.currentText()}"
+            )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
