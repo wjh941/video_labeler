@@ -429,10 +429,14 @@ QScrollBar::sub-line {
 
 QWidget#tableFilterBar,
 QWidget#tableActionBar,
-QWidget#videoControlsPanel {
-    background: #ffffff;
-    border: 1px solid #e5e6eb;
-    border-radius: 8px;
+QWidget#videoControlsPanel,
+QWidget#tableSearchRow {
+    background: #f8fafc;
+    border: 1px solid #dbe4ef;
+    border-radius: 11px;
+}
+QWidget#tableActionBar QPushButton {
+    min-height: 36px;
 }
 
 QTableWidget {

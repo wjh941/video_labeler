@@ -1447,6 +1447,7 @@ class MainWindow(QMainWindow):
         self.clear_filters_button = QPushButton("清空筛选")
 
         self.table_filter_search_row = QWidget()
+        self.table_filter_search_row.setObjectName("tableSearchRow")
         search_filter_layout = QHBoxLayout(self.table_filter_search_row)
         search_filter_layout.setContentsMargins(0, 0, 0, 0)
         search_filter_layout.setSpacing(8)
@@ -3005,6 +3006,8 @@ class MainWindow(QMainWindow):
             self.project_header.setChecked(False)
         self._mark_project_dirty()
         self._prepare_next_clip(record.end_seconds)
+        if is_new_record:
+            self.task_table.scrollToBottom()
         self._update_history_controls()
 
     def remove_selected_clip(self) -> None:
