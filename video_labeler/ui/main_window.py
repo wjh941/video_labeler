@@ -1030,10 +1030,12 @@ class MainWindow(QMainWindow):
         self.playback_rate_badge = QLabel("1.0x")
         self.playback_rate_badge.setObjectName("playbackRateBadge")
 
+        transport_controls.addWidget(self.set_start_button)
+        transport_controls.addWidget(self.set_end_button)
+        transport_controls.addStretch(1)
         transport_controls.addWidget(self.play_button)
         transport_controls.addWidget(self.seek_back_button)
         transport_controls.addWidget(self.seek_forward_button)
-        transport_controls.addStretch(1)
         video_controls_layout.addLayout(transport_controls)
 
         playback_rate_layout = QHBoxLayout()
@@ -1116,14 +1118,6 @@ class MainWindow(QMainWindow):
             cell_layout.addWidget(control)
             time_layout.addWidget(cell)
         layout.addLayout(time_layout)
-
-        clip_buttons = QHBoxLayout()
-        clip_buttons.setSpacing(8)
-        clip_buttons.addWidget(QLabel("截取"))
-        clip_buttons.addWidget(self.set_start_button)
-        clip_buttons.addWidget(self.set_end_button)
-        clip_buttons.addStretch(1)
-        layout.addLayout(clip_buttons)
 
         note_layout = QHBoxLayout()
         note_layout.setSpacing(8)

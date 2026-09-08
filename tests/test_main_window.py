@@ -2795,6 +2795,8 @@ def test_refined_video_controls_fit_without_text_clipping(qt_app, width, height)
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
         window.playback_rate_badge,
         window.speed_combo,
         window.custom_speed_spin,
@@ -2870,6 +2872,8 @@ def test_video_preview_keeps_clearance_from_timeline_and_controls(qt_app):
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
         window.speed_combo,
     )
 
@@ -2910,6 +2914,8 @@ def test_video_progress_and_controls_use_a_dedicated_panel_below_preview(qt_app)
         window.play_button,
         window.seek_back_button,
         window.seek_forward_button,
+        window.set_start_button,
+        window.set_end_button,
         window.speed_combo,
     )
 
