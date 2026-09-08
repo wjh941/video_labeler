@@ -1036,6 +1036,33 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(14)
 
+        # Compact review overview inspired by the reference right-hand cards:
+        # keep the active source and progress visible while editing.
+        self.annotation_overview = QFrame()
+        self.annotation_overview.setObjectName("annotationOverview")
+        overview_layout = QHBoxLayout(self.annotation_overview)
+        overview_layout.setContentsMargins(10, 8, 10, 8)
+        overview_layout.setSpacing(8)
+        overview_copy = QVBoxLayout()
+        overview_copy.setSpacing(1)
+        self.annotation_overview_title = QLabel("当前片段")
+        self.annotation_overview_title.setObjectName("annotationOverviewTitle")
+        self.annotation_overview_source = QLabel("未选择记录")
+        self.annotation_overview_source.setObjectName("annotationOverviewSource")
+        self.annotation_overview_source.setWordWrap(True)
+        overview_copy.addWidget(self.annotation_overview_title)
+        overview_copy.addWidget(self.annotation_overview_source)
+        overview_layout.addLayout(overview_copy, stretch=1)
+        self.annotation_overview_total = QLabel("0\n片段")
+        self.annotation_overview_pending = QLabel("0\n待审核")
+        self.annotation_overview_approved = QLabel("0\n已通过")
+        for badge in (self.annotation_overview_total, self.annotation_overview_pending, self.annotation_overview_approved):
+            badge.setObjectName("annotationMetric")
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setMinimumWidth(58)
+            overview_layout.addWidget(badge)
+        layout.addWidget(self.annotation_overview)
+
         source_layout = QHBoxLayout()
         self.source_label = QLabel("未选择视频")
         self.source_label.setWordWrap(True)
@@ -3389,6 +3416,10 @@ class MainWindow(QMainWindow):
         index = selected[0].row()
         record = self.records[index]
         self._editing_index = index
+        if hasattr(self, "annotation_overview_source"):
+            self.annotation_overview_source.setText(
+                f"#{index + 1} · {format_seconds(record.start_seconds)} → {format_seconds(record.end_seconds)}"
+            )
         self.start_spin.setValue(record.start_seconds)
         self.end_spin.setValue(record.end_seconds)
         self.sequence_spin.setValue(max(1, record.sequence))
@@ -3644,6 +3675,18 @@ class MainWindow(QMainWindow):
         self.annotation_stats_label.setText(
             f"片段 {total} · 待审核 {pending} · 已通过 {approved}"
         )
+        if hasattr(self, "annotation_overview_total"):
+            self.annotation_overview_total.setText(f"{total}\n片段")
+            self.annotation_overview_pending.setText(f"{pending}\n待审核")
+            self.annotation_overview_approved.setText(f"{approved}\n已通过")
+            active = self.task_table.currentRow()
+            if 0 <= active < len(self.records):
+                record = self.records[active]
+                self.annotation_overview_source.setText(
+                    f"#{active + 1} · {format_seconds(record.start_seconds)} → {format_seconds(record.end_seconds)}"
+                )
+            else:
+                self.annotation_overview_source.setText("未选择记录")
 
     def _show_task_context_menu(self, position) -> None:
         item = self.task_table.itemAt(position)
