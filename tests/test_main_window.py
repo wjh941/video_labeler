@@ -2581,7 +2581,7 @@ def test_task_table_keeps_a_usable_page_section(qt_app):
     assert window.task_panel.parentWidget() is window.workspace_content
 
 
-def test_video_panel_receives_about_fifty_two_percent_of_workspace(qt_app):
+def test_video_panel_receives_about_forty_six_percent_of_workspace(qt_app):
     window = MainWindow()
     window.resize(1440, 900)
     window.show()
@@ -2590,7 +2590,7 @@ def test_video_panel_receives_about_fifty_two_percent_of_workspace(qt_app):
     video_width = window.video_panel.width()
     annotation_width = window.annotation_workspace.width()
     assert video_width / (video_width + annotation_width) == pytest.approx(
-        0.52, abs=0.04
+        0.46, abs=0.04
     )
 
 
