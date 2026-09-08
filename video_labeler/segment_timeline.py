@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider
 
 
@@ -87,6 +87,30 @@ class SegmentTimelineSlider(QSlider):
                 painter.drawRoundedRect(
                     QRectF(position - 4, center_y - 7, 8, 14), 4, 4
                 )
+            painter.setPen(QColor("#e2e8f0"))
+            font = QFont(painter.font())
+            font.setPointSize(7)
+            painter.setFont(font)
+            painter.drawText(
+                QRectF(left - 52, center_y + 8, 104, 14),
+                Qt.AlignmentFlag.AlignCenter,
+                self._format_time(segment[0]),
+            )
+            painter.drawText(
+                QRectF(right - 52, center_y + 8, 104, 14),
+                Qt.AlignmentFlag.AlignCenter,
+                self._format_time(segment[1]),
+            )
+
+    @staticmethod
+    def _format_time(milliseconds: int) -> str:
+        total_ms = int(milliseconds)
+        hours, rem = divmod(total_ms, 3_600_000)
+        minutes, rem = divmod(rem, 60_000)
+        secs, ms = divmod(rem, 1000)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}.{ms:03d}"
 
     def mousePressEvent(self, event) -> None:
         segment = self.segment_range()

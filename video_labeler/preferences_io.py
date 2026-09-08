@@ -18,6 +18,7 @@ DEFAULT_HOTKEYS = {
     "undo": "Ctrl+Z",
     "redo": "Ctrl+Y",
     "save_project": "Ctrl+S",
+    "complete_clip": "Return",
 }
 
 

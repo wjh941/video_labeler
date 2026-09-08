@@ -931,7 +931,9 @@ class MainWindow(QMainWindow):
         self.video_scene = QGraphicsScene(self.video_widget)
         self.video_scene.setBackgroundBrush(QColor("#1F2937"))
         self.video_item = QGraphicsVideoItem()
-        self.video_item.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self.video_item.setAspectRatioMode(
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding
+        )
         self.video_item.videoSink().videoFrameChanged.connect(
             self._cache_paused_video_frame
         )
@@ -984,11 +986,17 @@ class MainWindow(QMainWindow):
         self.timeline_slider = SegmentTimelineSlider()
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.setTracking(False)
-        self.timeline_slider.setMinimumHeight(28)
+        self.timeline_slider.setMinimumHeight(40)
         position_layout.addWidget(self.position_label)
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
         position_layout.addWidget(self.frame_info_label)
+        self.goto_edit = QLineEdit()
+        self.goto_edit.setPlaceholderText("跳转 如 1:23.456")
+        self.goto_edit.setMaximumWidth(150)
+        self.goto_edit.setToolTip("输入时间码跳转，支持 1:23.456 / 0:01:23 / 83.5")
+        self.goto_edit.returnPressed.connect(self._jump_to_timecode)
+        position_layout.addWidget(self.goto_edit)
         video_controls_layout.addLayout(position_layout)
 
         self.play_button = QPushButton("播放")
@@ -2003,6 +2011,7 @@ class MainWindow(QMainWindow):
             "undo": self.undo_segments,
             "redo": self.redo_segments,
             "save_project": self.save_project,
+            "complete_clip": lambda: self.add_or_update_clip(),
         }
         for shortcut in getattr(self, "shortcuts", {}).values():
             shortcut.setEnabled(False)
@@ -3617,6 +3626,33 @@ class MainWindow(QMainWindow):
     def _seek_to_milliseconds(self, milliseconds: int) -> None:
         if milliseconds != self.player.position():
             self.player.setPosition(milliseconds)
+
+    def _jump_to_timecode(self) -> None:
+        raw = self.goto_edit.text().strip()
+        if not raw:
+            return
+        seconds = self._parse_timecode(raw)
+        if seconds is None:
+            self._set_status(f"无法识别时间码：{raw}")
+            return
+        duration = self.player.duration()
+        position = max(0, min(duration, round(seconds * 1000)))
+        self.player.setPosition(position)
+        self._set_status(f"已跳转到 {format_seconds(position / 1000)}")
+        self.goto_edit.clear()
+
+    def _parse_timecode(self, raw: str) -> float | None:
+        try:
+            parts = raw.replace(",", ".").split(":")
+            if len(parts) == 1:
+                return float(parts[0])
+            if len(parts) == 2:
+                return float(parts[0]) * 60 + float(parts[1])
+            if len(parts) == 3:
+                return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+        except ValueError:
+            pass
+        return None
 
     def _on_speed_preset_changed(self) -> None:
         rate = self.speed_combo.currentData()
