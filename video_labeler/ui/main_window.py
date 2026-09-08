@@ -471,6 +471,9 @@ class MainWindow(QMainWindow):
         self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
         self._utility_shortcuts: list[QShortcut] = []
         self.historical_behavior_tags: tuple[str, ...] = ()
+        self._last_annotation_labels: tuple[tuple[str, ...], str, str] = ((), "", "")
+        self._review_mode = False
+        self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
 
         self.setWindowTitle("视频片段标注工具")
@@ -1109,6 +1112,14 @@ class MainWindow(QMainWindow):
         self.undo_button = QPushButton("撤销")
         self.redo_button = QPushButton("重做")
         self.clear_button = QPushButton("清空编辑区")
+        self.next_pending_button = QPushButton("确认并下一条")
+        self.next_pending_button.setObjectName("primaryButton")
+        self.review_mode_button = QPushButton("审核模式：关")
+        self.review_mode_button.setCheckable(True)
+        self.review_mode_button.setToolTip("开启后按 1/2/3 快速标记：1 通过 / 2 剔除 / 3 待审核")
+        self.remember_labels_button = QPushButton("记住标签：关")
+        self.remember_labels_button.setCheckable(True)
+        self.remember_labels_button.setToolTip("开启后，新片段自动继承上一次行为标签")
         self.add_button.setObjectName("addClipButton")
         self.remove_button.setObjectName("dangerButton")
         self.undo_button.setObjectName("undoButton")
@@ -1119,6 +1130,9 @@ class MainWindow(QMainWindow):
             self.undo_button,
             self.redo_button,
             self.clear_button,
+            self.next_pending_button,
+            self.review_mode_button,
+            self.remember_labels_button,
         ):
             button.setMinimumHeight(34)
             button.setSizePolicy(
@@ -1127,6 +1141,7 @@ class MainWindow(QMainWindow):
             )
         primary_actions = QHBoxLayout()
         primary_actions.addWidget(self.add_button)
+        primary_actions.addWidget(self.next_pending_button)
         secondary_actions = QHBoxLayout()
         secondary_actions.setSpacing(8)
         for button in (
@@ -1134,6 +1149,8 @@ class MainWindow(QMainWindow):
             self.undo_button,
             self.redo_button,
             self.clear_button,
+            self.review_mode_button,
+            self.remember_labels_button,
         ):
             secondary_actions.addWidget(button)
         layout.addLayout(primary_actions)
@@ -1610,7 +1627,7 @@ class MainWindow(QMainWindow):
         self.annotation_stats_label.setObjectName("annotationStats")
         self.shortcut_hint_label = QLabel(
             "快捷键：空格 播放/暂停，A/D 前后帧，S/E 设置起止点，Del 删除，"
-            "Ctrl+Z/Y 撤销/重做，Ctrl+Enter 确认，Ctrl+Shift+E 快速导出"
+            "Ctrl+Z/Y 撤销/重做，Ctrl+回车 确认，Ctrl+Shift+E 快速导出"
         )
         self.shortcut_hint_label.setWordWrap(True)
 
@@ -1805,6 +1822,9 @@ class MainWindow(QMainWindow):
         self.undo_button.clicked.connect(self.undo_segments)
         self.redo_button.clicked.connect(self.redo_segments)
         self.clear_button.clicked.connect(self.clear_editor)
+        self.next_pending_button.clicked.connect(self.confirm_and_next_pending)
+        self.review_mode_button.toggled.connect(self._toggle_review_mode)
+        self.remember_labels_button.toggled.connect(self._toggle_remember_labels)
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
         self.approve_selected_button.clicked.connect(lambda: self._set_selected_review_status("approved"))
@@ -3009,7 +3029,7 @@ class MainWindow(QMainWindow):
         if isinstance(tag, str):
             self._remove_custom_behavior_tag(tag)
 
-    def add_or_update_clip(self) -> None:
+    def add_or_update_clip(self) -> bool:
         try:
             source = self.source_name.strip()
             if not source:
@@ -3034,7 +3054,7 @@ class MainWindow(QMainWindow):
             self._assert_output_is_unique(output)
         except ValueError as error:
             self._show_error("无法添加片段", f"添加片段失败：{error}")
-            return
+            return False
 
         record = ClipRecord(
             source=source,
@@ -3063,10 +3083,12 @@ class MainWindow(QMainWindow):
         if is_new_record and not before:
             self.project_header.setChecked(False)
         self._mark_project_dirty()
+        self._last_annotation_labels = (behaviors, polarity, lighting)
         self._prepare_next_clip(record.end_seconds)
         if is_new_record:
             self.task_table.scrollToBottom()
         self._update_history_controls()
+        return True
 
     def remove_selected_clip(self) -> None:
         self._delete_selected_records()
@@ -3113,12 +3135,144 @@ class MainWindow(QMainWindow):
         self.add_button.setText("添加片段")
         self.set_clip_range(saved_end_seconds, saved_end_seconds)
         self.historical_behavior_tags = ()
-        self._rebuild_behavior_controls(())
+        remembered_behaviors = (
+            self._last_annotation_labels[0] if self._remember_last_labels else ()
+        )
+        self._rebuild_behavior_controls(remembered_behaviors)
         self.note_edit.clear()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
         self._update_filename_preview()
+
+    def confirm_and_next_pending(self) -> None:
+        """Save the current clip, then jump to the next pending review task."""
+        if not self.add_or_update_clip():
+            return
+        self._jump_to_next_pending(0)
+
+    def _jump_to_next_pending(self, start: int = 0) -> bool:
+        if not self.records:
+            self._set_status("没有待审核片段")
+            return False
+        total = len(self.records)
+        for offset in range(total):
+            index = (start + offset) % total
+            if (
+                self.records[index].review_status == "pending"
+                and not self.task_table.isRowHidden(index)
+            ):
+                self.task_table.selectRow(index)
+                item = self.task_table.item(index, 0)
+                if item is not None:
+                    self.task_table.scrollToItem(item)
+                self._set_status(f"跳转到待审核片段 #{index + 1}")
+                return True
+        self._set_status("没有更多待审核片段")
+        return False
+
+    def _review_current_selected(self, review_status: str) -> None:
+        """Fast no-dialog review: 1 approved / 2 rejected / 3 pending."""
+        if review_status not in {"pending", "approved", "rejected"}:
+            return
+        indexes = self._selected_record_indexes()
+        if not indexes:
+            self._set_status("没有选中片段进行审核")
+            return
+        before = list(self.records)
+        reviewed_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        rejection_reason = "快速审核：需修正" if review_status == "rejected" else ""
+        for index in indexes:
+            record = self.records[index]
+            record.review_status = review_status
+            record.reviewer = "local-user" if review_status != "pending" else ""
+            record.reviewed_at = reviewed_at if review_status != "pending" else ""
+            record.review_comment = ""
+            record.rejection_reason = rejection_reason
+            record.review_history.append({
+                "status": review_status,
+                "reviewer": record.reviewer,
+                "reviewed_at": record.reviewed_at,
+                "comment": record.review_comment,
+                "rejection_reason": record.rejection_reason,
+            })
+        self._refresh_table()
+        self._mark_project_dirty()
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self._update_history_controls()
+        labels = {"approved": "通过", "rejected": "剔除", "pending": "待审核"}
+        self._set_status(
+            f"快速审核：{len(indexes)} 个片段标记为{labels[review_status]}"
+        )
+        self._jump_to_next_pending(indexes[-1] + 1)
+
+    def _toggle_behavior_shortcut(self, tag: str) -> None:
+        if tag not in self._available_behavior_tags():
+            return
+        selected = tag in self.selected_behaviors()
+        self.behavior_tag_combo.set_tag_checked(tag, not selected)
+        self._set_status(f"{'取消' if selected else '选择'}行为标签：{tag}")
+
+    def _toggle_review_mode(self, enabled: bool) -> None:
+        self._review_mode = enabled
+        self.review_mode_button.setText(f"审核模式：{'开' if enabled else '关'}")
+        if enabled:
+            self._set_status("审核模式已开启：1 通过 / 2 剔除 / 3 待审核")
+        else:
+            self._set_status("审核模式已关闭：数字键 1-9 选择行为标签")
+
+    def _toggle_remember_labels(self, enabled: bool) -> None:
+        self._remember_last_labels = enabled
+        self.remember_labels_button.setText(f"记住标签：{'开' if enabled else '关'}")
+        self._set_status(
+            "已开启记住上次标签" if enabled else "已关闭记住上次标签"
+        )
+
+    def _text_input_focused(self) -> bool:
+        focus = QApplication.focusWidget()
+        return isinstance(
+            focus,
+            (
+                QLineEdit,
+                QSpinBox,
+                QDoubleSpinBox,
+                QPlainTextEdit,
+                QComboBox,
+                QKeySequenceEdit,
+            ),
+        )
+
+    def _dispatch_number_key(self, digit: int) -> None:
+        if not 1 <= digit <= 9:
+            return
+        if self._review_mode:
+            status = {1: "approved", 2: "rejected", 3: "pending"}.get(digit)
+            if status is not None:
+                self._review_current_selected(status)
+            return
+        tags = self._available_behavior_tags()
+        index = digit - 1
+        if index < len(tags):
+            self._toggle_behavior_shortcut(tags[index])
+
+    def keyPressEvent(self, event) -> None:
+        text = event.text()
+        if (
+            not self._text_input_focused()
+            and text.isdigit()
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            self._dispatch_number_key(int(text))
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def toggle_playback(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
