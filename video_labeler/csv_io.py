@@ -13,7 +13,8 @@ CSV_FIELDS = (*CSV_REQUIRED_FIELDS, "note")
 FULL_CSV_FIELDS = (
     "source", "start_seconds", "end_seconds", "output", "behaviors",
     "polarity", "lighting", "sequence", "status", "error", "note",
-    "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason"
+    "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason",
+    "data_stratum"
 )
 
 
@@ -86,6 +87,7 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                 "reviewed_at": record.reviewed_at,
                 "review_comment": record.review_comment,
                 "rejection_reason": record.rejection_reason,
+                "data_stratum": record.data_stratum,
             })
 
 
@@ -109,7 +111,7 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
             if not isinstance(behaviors, list) or not all(isinstance(tag, str) for tag in behaviors):
                 raise ValueError(f"full CSV row {index} behaviors must be a JSON list")
             review_status = row.get("review_status") or "pending"
-            if review_status not in {"pending", "approved", "rejected"}:
+            if review_status not in {"pending", "approved", "needs_fix", "rejected"}:
                 raise ValueError(f"full CSV row {index} has an invalid review status")
             records.append(ClipRecord(
                 source=row["source"], start_seconds=start, end_seconds=end,
@@ -122,6 +124,7 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 reviewed_at=row.get("reviewed_at", ""),
                 review_comment=row.get("review_comment", ""),
                 rejection_reason=row.get("rejection_reason", ""),
+                data_stratum=row.get("data_stratum", ""),
             ))
     return records
 

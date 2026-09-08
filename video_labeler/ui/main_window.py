@@ -99,6 +99,9 @@ from ..models import (
     BEHAVIOR_LABELS,
     LIGHTING_VALUES,
     POLARITIES,
+    REVIEW_STATUS_LABELS,
+    STRATUM_LABELS,
+    STRATUM_VALUES,
     VIEW_TYPES,
     ClipRecord,
     ProjectMetadata,
@@ -151,6 +154,7 @@ TABLE_COLUMNS = (
     "状态",
     "错误信息",
     "备注",
+    "分层",
 )
 CUSTOM_OPTION_TEXT = "自定义..."
 CUSTOM_PLAYBACK_RATE_TEXT = "自定义"
@@ -1123,7 +1127,7 @@ class MainWindow(QMainWindow):
         self.next_pending_button.setObjectName("primaryButton")
         self.review_mode_button = QPushButton("审核模式：关")
         self.review_mode_button.setCheckable(True)
-        self.review_mode_button.setToolTip("开启后按 1/2/3 快速标记：1 通过 / 2 剔除 / 3 待审核")
+        self.review_mode_button.setToolTip("开启后按 1/2/3/4 快速标记：1 通过 / 2 需修正 / 3 剔除 / 4 待审核")
         self.remember_labels_button = QPushButton("记住标签：关")
         self.remember_labels_button.setCheckable(True)
         self.remember_labels_button.setToolTip("开启后，新片段自动继承上一次行为标签")
@@ -1274,6 +1278,20 @@ class MainWindow(QMainWindow):
         polarity_layout.addWidget(polarity_content)
         self.polarity_group.set_content(polarity_content)
         layout.addWidget(self.polarity_group)
+        self.stratum_combo = QComboBox()
+        self.stratum_combo.addItem("不设置", "")
+        for value in STRATUM_VALUES:
+            self.stratum_combo.addItem(STRATUM_LABELS.get(value, value), value)
+        self.stratum_group = CollapsibleGroupBox("样本分层")
+        self.stratum_group.setChecked(False)
+        stratum_content = QWidget()
+        stratum_form = QFormLayout(stratum_content)
+        stratum_form.addRow("分层", self.stratum_combo)
+        stratum_layout = QVBoxLayout(self.stratum_group)
+        stratum_layout.setContentsMargins(6, 6, 6, 6)
+        stratum_layout.addWidget(stratum_content)
+        self.stratum_group.set_content(stratum_content)
+        layout.addWidget(self.stratum_group)
         self._update_label_group_titles()
 
         layout.addWidget(QLabel("生成的文件名"))
@@ -1467,7 +1485,8 @@ class MainWindow(QMainWindow):
         self.batch_delete_button = QPushButton("批量删除选中")
         self.batch_delete_button.setObjectName("dangerButton")
         self.approve_selected_button = QPushButton("批量通过审核")
-        self.reject_selected_button = QPushButton("批量驳回审核")
+        self.needs_fix_selected_button = QPushButton("批量标记需修正")
+        self.reject_selected_button = QPushButton("批量剔除")
         self.behavior_filter_combo = QComboBox()
         self.behavior_filter_combo.addItem("全部行为", None)
         for behavior in BEHAVIOR_LABELS:
@@ -1494,7 +1513,8 @@ class MainWindow(QMainWindow):
         self.review_filter_combo.addItem("全部审核状态", None)
         self.review_filter_combo.addItem("待审核", "pending")
         self.review_filter_combo.addItem("已通过", "approved")
-        self.review_filter_combo.addItem("已驳回", "rejected")
+        self.review_filter_combo.addItem("需修正", "needs_fix")
+        self.review_filter_combo.addItem("已剔除", "rejected")
         self.sort_combo = QComboBox()
         self.sort_combo.addItem("编号升序", ("sequence", False))
         self.sort_combo.addItem("编号降序", ("sequence", True))
@@ -1548,6 +1568,7 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.batch_edit_button)
         action_layout.addWidget(self.batch_delete_button)
         action_layout.addWidget(self.approve_selected_button)
+        action_layout.addWidget(self.needs_fix_selected_button)
         action_layout.addWidget(self.reject_selected_button)
         action_layout.addStretch(1)
         self.detach_table_button = QPushButton("弹出表格")
@@ -1835,6 +1856,7 @@ class MainWindow(QMainWindow):
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
         self.approve_selected_button.clicked.connect(lambda: self._set_selected_review_status("approved"))
+        self.needs_fix_selected_button.clicked.connect(lambda: self._set_selected_review_status("needs_fix"))
         self.reject_selected_button.clicked.connect(lambda: self._set_selected_review_status("rejected"))
         self.detach_table_button.clicked.connect(self._show_task_table_dialog)
         self.behavior_filter_combo.currentIndexChanged.connect(
@@ -3055,6 +3077,7 @@ class MainWindow(QMainWindow):
             behaviors = self.selected_behaviors()
             polarity = self.polarity_combo.currentText()
             lighting = self.lighting_combo.currentText()
+            stratum = self.stratum_combo.currentData() or ""
             sequence = self.sequence_spin.value()
             output = build_filename(
                 metadata, behaviors, polarity, lighting, sequence
@@ -3072,6 +3095,7 @@ class MainWindow(QMainWindow):
             behaviors=behaviors,
             polarity=polarity,
             lighting=lighting,
+            data_stratum=stratum,
             sequence=sequence,
             note=self.note_edit.text().strip(),
         )
@@ -3131,6 +3155,7 @@ class MainWindow(QMainWindow):
         self._rebuild_behavior_controls(())
         self.polarity_combo.setCurrentIndex(0)
         self.lighting_combo.setCurrentIndex(0)
+        self.stratum_combo.setCurrentIndex(0)
         self.note_edit.clear()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
@@ -3203,8 +3228,8 @@ class MainWindow(QMainWindow):
         self._set_status("没有更多待审核片段")
 
     def _review_current_selected(self, review_status: str) -> None:
-        """Fast no-dialog review: 1 approved / 2 rejected / 3 pending."""
-        if review_status not in {"pending", "approved", "rejected"}:
+        """Fast no-dialog review: 1 approved / 2 needs_fix / 3 rejected / 4 pending."""
+        if review_status not in REVIEW_STATUSES:
             return
         indexes = self._selected_record_indexes()
         if not indexes:
@@ -3217,7 +3242,10 @@ class MainWindow(QMainWindow):
             .isoformat()
             .replace("+00:00", "Z")
         )
-        rejection_reason = "快速审核：需修正" if review_status == "rejected" else ""
+        rejection_reason = {
+            "needs_fix": "快速审核：需修正",
+            "rejected": "快速审核：剔除",
+        }.get(review_status, "")
         for index in indexes:
             record = self.records[index]
             record.review_status = review_status
@@ -3238,7 +3266,7 @@ class MainWindow(QMainWindow):
         if history is not None:
             history.push(before, self.records)
         self._update_history_controls()
-        labels = {"approved": "通过", "rejected": "剔除", "pending": "待审核"}
+        labels = REVIEW_STATUS_LABELS
         self._set_status(
             f"快速审核：{len(indexes)} 个片段标记为{labels[review_status]}"
         )
@@ -3255,7 +3283,7 @@ class MainWindow(QMainWindow):
         self._review_mode = enabled
         self.review_mode_button.setText(f"审核模式：{'开' if enabled else '关'}")
         if enabled:
-            self._set_status("审核模式已开启：1 通过 / 2 剔除 / 3 待审核")
+            self._set_status("审核模式已开启：1 通过 / 2 需修正 / 3 剔除 / 4 待审核")
         else:
             self._set_status("审核模式已关闭：数字键 1-9 选择行为标签")
 
@@ -3284,7 +3312,7 @@ class MainWindow(QMainWindow):
         if not 1 <= digit <= 9:
             return
         if self._review_mode:
-            status = {1: "approved", 2: "rejected", 3: "pending"}.get(digit)
+            status = {1: "approved", 2: "needs_fix", 3: "rejected", 4: "pending"}.get(digit)
             if status is not None:
                 self._review_current_selected(status)
             return
@@ -3483,6 +3511,7 @@ class MainWindow(QMainWindow):
                     STATUS_LABELS.get(record.status, record.status),
                     record.error,
                     record.note,
+                    STRATUM_LABELS.get(record.data_stratum, record.data_stratum) if record.data_stratum else "",
                 )
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(value)
@@ -3654,12 +3683,16 @@ class MainWindow(QMainWindow):
                 record.lighting,
                 lambda value: normalize_label_token(value, "lighting"),
             )
+        if record.data_stratum:
+            stratum_index = self.stratum_combo.findData(record.data_stratum)
+            if stratum_index >= 0:
+                self.stratum_combo.setCurrentIndex(stratum_index)
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()
 
     def _set_selected_review_status(self, review_status: str) -> None:
-        if review_status not in {"pending", "approved", "rejected"}:
+        if review_status not in REVIEW_STATUSES:
             raise ValueError("审核状态无效")
         indexes = self._selected_record_indexes()
         if not indexes:
@@ -3669,12 +3702,12 @@ class MainWindow(QMainWindow):
         reviewer = "local-user"
         review_comment = ""
         rejection_reason = ""
-        if review_status in {"approved", "rejected"}:
+        if review_status in {"approved", "needs_fix", "rejected"}:
             comment, accepted = QInputDialog.getText(self, "审核备注", "审核意见/驳回原因：")
             if not accepted:
                 return
             review_comment = comment.strip()
-            rejection_reason = review_comment if review_status == "rejected" else ""
+            rejection_reason = review_comment if review_status in {"needs_fix", "rejected"} else ""
         reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         for index in indexes:
             record = self.records[index]
@@ -3695,7 +3728,7 @@ class MainWindow(QMainWindow):
         history = self._active_history(create=True)
         if history is not None:
             history.push(before, self.records)
-        self._set_status(f"已将 {len(indexes)} 个片段标记为{review_status}")
+        self._set_status(f"已将 {len(indexes)} 个片段标记为{REVIEW_STATUS_LABELS.get(review_status, review_status)}")
 
     def _selected_record_indexes(self) -> list[int]:
         return sorted(
@@ -3886,8 +3919,10 @@ class MainWindow(QMainWindow):
         total = len(records)
         approved = sum(record.review_status == "approved" for record in records)
         pending = sum(record.review_status == "pending" for record in records)
+        needs_fix = sum(record.review_status == "needs_fix" for record in records)
+        rejected = sum(record.review_status == "rejected" for record in records)
         self.annotation_stats_label.setText(
-            f"片段 {total} · 待审核 {pending} · 已通过 {approved}"
+            f"片段 {total} · 待审核 {pending} · 通过 {approved} · 需修正 {needs_fix} · 剔除 {rejected}"
         )
         if hasattr(self, "annotation_overview_total"):
             self.annotation_overview_total.setText(f"{total}\n片段")

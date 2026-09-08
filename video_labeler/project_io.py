@@ -337,6 +337,7 @@ def _record_to_dict(record: ClipRecord, *, include_review: bool = False) -> dict
         "status": record.status,
         "error": record.error,
         "note": record.note,
+        "data_stratum": record.data_stratum,
     }
     if include_review:
         document["review_status"] = record.review_status
@@ -363,6 +364,7 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         review_comment=document.get("review_comment", ""),
         rejection_reason=document.get("rejection_reason", ""),
         review_history=[dict(item) for item in document.get("review_history", [])],
+        data_stratum=document.get("data_stratum", ""),
     )
 
 
@@ -546,6 +548,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
     optional_keys = {
         "note", "review_status", "reviewer", "reviewed_at",
         "review_comment", "rejection_reason", "review_history",
+        "data_stratum",
     }
     if (
         not isinstance(document, dict)
@@ -566,6 +569,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "reviewed_at",
         "review_comment",
         "rejection_reason",
+        "data_stratum",
     ):
         history = document.get("review_history", [])
         if not isinstance(history, list) or not all(isinstance(item, dict) for item in history):
@@ -584,7 +588,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
     if not _is_int(document["sequence"]):
         raise ValueError("segment sequence must be an integer")
     review_status = document.get("review_status", "pending")
-    if review_status not in {"pending", "approved", "rejected"}:
+    if review_status not in {"pending", "approved", "needs_fix", "rejected"}:
         raise ValueError("segment review_status is invalid")
     return {
         "source": document["source"],
@@ -599,6 +603,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "error": document["error"],
         "note": document.get("note", ""),
         "review_status": review_status,
+        "data_stratum": document.get("data_stratum", ""),
     }
 
 

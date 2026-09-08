@@ -16,6 +16,21 @@ BEHAVIOR_LABELS = (
 VIEW_TYPES = ("panorama", "closeup", "indoor")
 POLARITIES = ("pos", "neg")
 LIGHTING_VALUES = ("daytime", "night_full_color", "night_black_white")
+REVIEW_STATUSES = ("pending", "approved", "needs_fix", "rejected")
+REVIEW_STATUS_LABELS = {
+    "pending": "待审核",
+    "approved": "通过",
+    "needs_fix": "需修正",
+    "rejected": "剔除",
+}
+STRATUM_VALUES = ("easy_pos", "hard_pos", "easy_neg", "hard_neg", "pending_review")
+STRATUM_LABELS = {
+    "easy_pos": "简单正向",
+    "hard_pos": "困难正向",
+    "easy_neg": "简单负向",
+    "hard_neg": "困难负向",
+    "pending_review": "待复核",
+}
 
 
 @dataclass(frozen=True)
@@ -44,3 +59,4 @@ class ClipRecord:
     review_comment: str = ""
     rejection_reason: str = ""
     review_history: list[dict[str, str]] = field(default_factory=list)
+    data_stratum: str = ""
