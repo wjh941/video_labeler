@@ -43,7 +43,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
-    QGridLayout,
     QGraphicsDropShadowEffect,
     QGraphicsScene,
     QGraphicsView,
@@ -948,13 +947,7 @@ class MainWindow(QMainWindow):
         self.video_widget.setScene(self.video_scene)
         self.video_viewport = self.video_widget.viewport()
         self.video_viewport.installEventFilter(self)
-        self.video_stage = QWidget()
-        self.video_stage.setObjectName("videoStage")
-        video_stage_layout = QGridLayout(self.video_stage)
-        video_stage_layout.setContentsMargins(0, 0, 0, 0)
-        video_stage_layout.setSpacing(0)
-        video_stage_layout.addWidget(self.video_widget, 0, 0)
-        layout.addWidget(self.video_stage, stretch=1)
+        layout.addWidget(self.video_widget, stretch=1)
 
         self.video_info_panel = QWidget()
         self.video_info_panel.setObjectName("videoInfoPanel")
@@ -998,8 +991,6 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(self.frame_info_label)
         video_controls_layout.addLayout(position_layout)
 
-        transport_controls = QHBoxLayout()
-        transport_controls.setSpacing(8)
         self.play_button = QPushButton("播放")
         self.seek_back_button = QPushButton("-5s")
         self.seek_forward_button = QPushButton("+5s")
@@ -1054,36 +1045,11 @@ class MainWindow(QMainWindow):
         self.playback_rate_badge = QLabel("1.0x")
         self.playback_rate_badge.setObjectName("playbackRateBadge")
 
-        transport_controls.addWidget(self.set_start_button)
-        transport_controls.addWidget(self.set_end_button)
-        transport_controls.addWidget(self.quick_add_button)
-        self.clip_range_label = QLabel("起 00:00:00.000 → 止 00:00:00.000")
+        self.clip_range_label = QLabel("起 0:00.000 · 止 0:00.000")
         self.clip_range_label.setObjectName("clipRangeLabel")
         self.clip_range_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        transport_controls.addWidget(self.clip_range_label)
-        transport_controls.addStretch(1)
-        transport_controls.addWidget(self.play_button)
-        transport_controls.addWidget(self.seek_back_button)
-        transport_controls.addWidget(self.seek_forward_button)
-        video_controls_layout.addLayout(transport_controls)
-        self.video_controls_panel.setStyleSheet(
-            "QWidget#videoControlsPanel { background-color: rgba(15, 23, 42, 218); "
-            "border: 1px solid rgba(148, 163, 184, 150); border-radius: 8px; }"
-        )
-        video_stage_layout.addWidget(
-            self.video_controls_panel, 0, 0, Qt.AlignmentFlag.AlignBottom
-        )
-
-        playback_rate_layout = QHBoxLayout()
-        playback_rate_layout.setSpacing(8)
-        playback_rate_layout.addStretch(1)
-        playback_rate_layout.addWidget(QLabel("播放速度"))
-        playback_rate_layout.addWidget(self.playback_rate_badge)
-        playback_rate_layout.addWidget(self.speed_combo)
-        playback_rate_layout.addWidget(self.custom_speed_spin)
-        video_controls_layout.addLayout(playback_rate_layout)
         layout.addWidget(self.video_controls_panel)
         return group
 
@@ -1156,6 +1122,31 @@ class MainWindow(QMainWindow):
             cell_layout.addWidget(control)
             time_layout.addWidget(cell)
         layout.addLayout(time_layout)
+
+        transport_controls = QHBoxLayout()
+        transport_controls.setSpacing(6)
+        transport_controls.addWidget(self.set_start_button)
+        transport_controls.addWidget(self.set_end_button)
+        transport_controls.addWidget(self.quick_add_button)
+        transport_controls.addWidget(self.clip_range_label, stretch=1)
+        layout.addLayout(transport_controls)
+
+        playback_controls = QHBoxLayout()
+        playback_controls.setSpacing(6)
+        playback_controls.addWidget(self.play_button)
+        playback_controls.addWidget(self.seek_back_button)
+        playback_controls.addWidget(self.seek_forward_button)
+        playback_controls.addStretch(1)
+        layout.addLayout(playback_controls)
+
+        playback_rate_layout = QHBoxLayout()
+        playback_rate_layout.setSpacing(6)
+        playback_rate_layout.addWidget(QLabel("速度"))
+        playback_rate_layout.addWidget(self.playback_rate_badge)
+        playback_rate_layout.addWidget(self.speed_combo)
+        playback_rate_layout.addWidget(self.custom_speed_spin)
+        playback_rate_layout.addStretch(1)
+        layout.addLayout(playback_rate_layout)
 
         note_layout = QHBoxLayout()
         note_layout.setSpacing(8)
@@ -2124,6 +2115,15 @@ class MainWindow(QMainWindow):
         self.source_path = entry.path
         self.source_name = entry.path.name
         self.source_label.setText(entry.path.name)
+        self.video_info_title.setText(entry.path.name)
+        meta = entry.metadata or {}
+        if meta:
+            self.video_info_meta.setText(
+                f"{format_seconds(meta.get('duration', 0))} · "
+                f"{meta.get('width', 0)}×{meta.get('height', 0)}"
+            )
+        else:
+            self.video_info_meta.setText("视频已加载")
         self._editing_index = None
         self.add_button.setText("添加片段")
         self._sync_project_video_combo()
@@ -2265,6 +2265,8 @@ class MainWindow(QMainWindow):
         self.source_name = ""
         self._editing_index = None
         self.source_label.setText("未选择视频")
+        self.video_info_title.setText("未选择视频")
+        self.video_info_meta.setText("导入视频后开始标注")
         self.project_video_combo.clear()
         self.project_video_combo.setEnabled(False)
         self._set_media_source(None)
@@ -2428,6 +2430,8 @@ class MainWindow(QMainWindow):
             self.source_path = None
             self.source_name = ""
             self.source_label.setText("未选择视频")
+            self.video_info_title.setText("未选择视频")
+            self.video_info_meta.setText("导入视频后开始标注")
             self._sync_project_video_combo()
             self._refresh_table()
             self._set_media_source(None)
@@ -3570,9 +3574,18 @@ class MainWindow(QMainWindow):
     def _update_clip_range_label(self, *_args: object) -> None:
         if hasattr(self, "clip_range_label"):
             self.clip_range_label.setText(
-                f"起 {format_seconds(self.start_spin.value())} → "
-                f"止 {format_seconds(self.end_spin.value())}"
+                f"起 {self._short_seconds(self.start_spin.value())} · "
+                f"止 {self._short_seconds(self.end_spin.value())}"
             )
+
+    def _short_seconds(self, seconds: float) -> str:
+        total_ms = round(seconds * 1000)
+        hours, rem = divmod(total_ms, 3_600_000)
+        minutes, rem = divmod(rem, 60_000)
+        secs, ms = divmod(rem, 1000)
+        if hours:
+            return f"{hours}:{minutes:02d}:{secs:02d}.{ms:03d}"
+        return f"{minutes}:{secs:02d}.{ms:03d}"
 
     def _current_fps(self) -> float:
         video = self._active_project_video()
