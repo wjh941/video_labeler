@@ -14,7 +14,8 @@ FULL_CSV_FIELDS = (
     "source", "start_seconds", "end_seconds", "output", "behaviors",
     "polarity", "lighting", "sequence", "status", "error", "note",
     "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason",
-    "data_stratum", "events"
+    "data_stratum", "events",
+    "age", "face_familiarity", "reid_familiarity", "person_count"
 )
 
 
@@ -123,6 +124,10 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                     ],
                     ensure_ascii=False,
                 ),
+                "age": record.age,
+                "face_familiarity": record.face_familiarity,
+                "reid_familiarity": record.reid_familiarity,
+                "person_count": record.person_count,
             })
 
 
@@ -161,6 +166,10 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 rejection_reason=row.get("rejection_reason", ""),
                 data_stratum=row.get("data_stratum", ""),
                 events=_parse_events_json(row.get("events", "")),
+                age=row.get("age", ""),
+                face_familiarity=row.get("face_familiarity", ""),
+                reid_familiarity=row.get("reid_familiarity", ""),
+                person_count=int(row.get("person_count", 0) or 0),
             ))
     return records
 

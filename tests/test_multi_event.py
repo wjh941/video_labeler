@@ -35,6 +35,10 @@ def _event_record():
             EventRecord("dog_out", 100, 800),
             EventRecord("fall", 300, 900),
         ],
+        age="adult",
+        face_familiarity="familiar",
+        reid_familiarity="unfamiliar",
+        person_count=2,
     )
 
 
@@ -51,7 +55,12 @@ def test_project_io_roundtrips_events():
     project.active_video_id = "v1"
 
     restored = project_io.project_from_dict(project_io.project_to_dict(project))
-    assert restored.videos[0].segments[0].events == record.events
+    restored_record = restored.videos[0].segments[0]
+    assert restored_record.events == record.events
+    assert restored_record.age == "adult"
+    assert restored_record.face_familiarity == "familiar"
+    assert restored_record.reid_familiarity == "unfamiliar"
+    assert restored_record.person_count == 2
 
 
 def test_full_csv_roundtrips_events(tmp_path):
@@ -60,6 +69,10 @@ def test_full_csv_roundtrips_events(tmp_path):
     csv_io.write_full_clip_csv(path, [record])
     restored = csv_io.read_full_clip_csv(path)
     assert restored[0].events == record.events
+    assert restored[0].age == "adult"
+    assert restored[0].face_familiarity == "familiar"
+    assert restored[0].reid_familiarity == "unfamiliar"
+    assert restored[0].person_count == 2
 
 
 def test_ui_collects_clears_and_restores_events(qt_app, tmp_path):
@@ -92,3 +105,43 @@ def test_ui_collects_clears_and_restores_events(qt_app, tmp_path):
         EventRecord("dog_out", 100, 800),
         EventRecord("fall", 300, 900),
     ]
+
+
+def test_ui_collects_and_restores_person_attributes(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.polarity_combo.setCurrentText("pos")
+    window.lighting_combo.setCurrentText("daytime")
+    window.set_clip_range(1.0, 2.0)
+    window.behavior_checks["dog_out"].setChecked(True)
+
+    window.age_combo.setCurrentIndex(window.age_combo.findData("adult"))
+    window.face_familiarity_combo.setCurrentIndex(
+        window.face_familiarity_combo.findData("familiar")
+    )
+    window.reid_familiarity_combo.setCurrentIndex(
+        window.reid_familiarity_combo.findData("unfamiliar")
+    )
+    window.person_count_spin.setValue(2)
+
+    assert window.add_or_update_clip()
+    assert len(window.records) == 1
+    record = window.records[0]
+    assert record.age == "adult"
+    assert record.face_familiarity == "familiar"
+    assert record.reid_familiarity == "unfamiliar"
+    assert record.person_count == 2
+
+    window.clear_editor()
+    assert window.age_combo.currentData() == ""
+    assert window.person_count_spin.value() == 0
+
+    window.task_table.selectRow(0)
+    window._load_selected_clip()
+    assert window.age_combo.currentData() == "adult"
+    assert window.face_familiarity_combo.currentData() == "familiar"
+    assert window.reid_familiarity_combo.currentData() == "unfamiliar"
+    assert window.person_count_spin.value() == 2

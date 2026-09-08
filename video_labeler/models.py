@@ -31,6 +31,20 @@ STRATUM_LABELS = {
     "hard_neg": "困难负向",
     "pending_review": "待复核",
 }
+AGE_VALUES = ("child", "youth", "adult", "elder", "unknown")
+AGE_LABELS = {
+    "child": "儿童",
+    "youth": "青年",
+    "adult": "成人",
+    "elder": "老年",
+    "unknown": "未知",
+}
+FAMILIARITY_VALUES = ("familiar", "unfamiliar", "unknown")
+FAMILIARITY_LABELS = {
+    "familiar": "熟悉",
+    "unfamiliar": "陌生",
+    "unknown": "未知",
+}
 
 
 @dataclass(frozen=True)
@@ -68,3 +82,7 @@ class ClipRecord:
     review_history: list[dict[str, str]] = field(default_factory=list)
     data_stratum: str = ""
     events: list[EventRecord] = field(default_factory=list)
+    age: str = ""
+    face_familiarity: str = ""
+    reid_familiarity: str = ""
+    person_count: int = 0

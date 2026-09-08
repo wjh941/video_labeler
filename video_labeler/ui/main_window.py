@@ -96,7 +96,11 @@ from ..ffmpeg_service import (
 from ..frame_cache import FrameCache
 from ..history import SegmentHistory
 from ..models import (
+    AGE_LABELS,
+    AGE_VALUES,
     BEHAVIOR_LABELS,
+    FAMILIARITY_LABELS,
+    FAMILIARITY_VALUES,
     LIGHTING_VALUES,
     POLARITIES,
     REVIEW_STATUS_LABELS,
@@ -306,7 +310,7 @@ class BehaviorTagComboBox(QComboBox):
         model = QStandardItemModel(self)
         model.dataChanged.connect(self._on_model_data_changed)
         self.setModel(model)
-        self.view().setMinimumWidth(320)
+        self.view().setMinimumWidth(240)
         self.view().pressed.connect(self._toggle_index)
 
     def set_tags(
@@ -1150,7 +1154,7 @@ class MainWindow(QMainWindow):
             self.review_mode_button,
             self.remember_labels_button,
         ):
-            button.setMinimumHeight(34)
+            button.setMinimumHeight(28)
             button.setSizePolicy(
                 QSizePolicy.Policy.Expanding,
                 QSizePolicy.Policy.Fixed,
@@ -1244,7 +1248,7 @@ class MainWindow(QMainWindow):
         self.polarity_combo = QComboBox()
         self.polarity_combo.addItems(POLARITIES)
         self.polarity_combo.setToolTip("正向=pos，负向=neg")
-        self.polarity_combo.view().setMinimumWidth(180)
+        self.polarity_combo.view().setMinimumWidth(120)
         self._configure_custom_combo(
             self.polarity_combo,
             "正负性",
@@ -1256,7 +1260,7 @@ class MainWindow(QMainWindow):
         self.lighting_combo.setToolTip(
             "白天=daytime，夜间彩色=night_full_color，夜间黑白=night_black_white"
         )
-        self.lighting_combo.view().setMinimumWidth(240)
+        self.lighting_combo.view().setMinimumWidth(180)
         self._configure_custom_combo(
             self.lighting_combo,
             "光照",
@@ -1323,6 +1327,40 @@ class MainWindow(QMainWindow):
         events_layout.addWidget(self.add_event_button)
         self.events_group.set_content(events_content)
         layout.addWidget(self.events_group)
+
+        self.person_group = CollapsibleGroupBox("人员身份")
+        self.person_group.setChecked(False)
+        person_content = QWidget()
+        person_form = QFormLayout(person_content)
+        self.age_combo = QComboBox()
+        self.age_combo.addItem("不设置", "")
+        for value in AGE_VALUES:
+            self.age_combo.addItem(AGE_LABELS.get(value, value), value)
+        self.face_familiarity_combo = QComboBox()
+        self.face_familiarity_combo.addItem("不设置", "")
+        for value in FAMILIARITY_VALUES:
+            self.face_familiarity_combo.addItem(
+                FAMILIARITY_LABELS.get(value, value), value
+            )
+        self.reid_familiarity_combo = QComboBox()
+        self.reid_familiarity_combo.addItem("不设置", "")
+        for value in FAMILIARITY_VALUES:
+            self.reid_familiarity_combo.addItem(
+                FAMILIARITY_LABELS.get(value, value), value
+            )
+        self.person_count_spin = QSpinBox()
+        self.person_count_spin.setRange(0, 99)
+        self.person_count_spin.setValue(0)
+        self.person_count_spin.setSpecialValueText("不设置")
+        person_form.addRow("年龄", self.age_combo)
+        person_form.addRow("人脸熟悉度", self.face_familiarity_combo)
+        person_form.addRow("体态 ReID", self.reid_familiarity_combo)
+        person_form.addRow("人数", self.person_count_spin)
+        person_layout = QVBoxLayout(self.person_group)
+        person_layout.setContentsMargins(6, 6, 6, 6)
+        person_layout.addWidget(person_content)
+        self.person_group.set_content(person_content)
+        layout.addWidget(self.person_group)
 
         self._update_label_group_titles()
 
@@ -3131,6 +3169,10 @@ class MainWindow(QMainWindow):
             sequence=sequence,
             note=self.note_edit.text().strip(),
             events=self._collect_events(),
+            age=self.age_combo.currentData() or "",
+            face_familiarity=self.face_familiarity_combo.currentData() or "",
+            reid_familiarity=self.reid_familiarity_combo.currentData() or "",
+            person_count=self.person_count_spin.value(),
         )
         before = list(self.records)
         is_new_record = self._editing_index is None
@@ -3191,6 +3233,10 @@ class MainWindow(QMainWindow):
         self.stratum_combo.setCurrentIndex(0)
         self.note_edit.clear()
         self._clear_event_rows()
+        self.age_combo.setCurrentIndex(0)
+        self.face_familiarity_combo.setCurrentIndex(0)
+        self.reid_familiarity_combo.setCurrentIndex(0)
+        self.person_count_spin.setValue(0)
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -3281,6 +3327,22 @@ class MainWindow(QMainWindow):
                 end_ms=event.end_time_ms,
             )
 
+    def _restore_person_attributes(self, record: ClipRecord) -> None:
+        self.age_combo.setCurrentIndex(
+            self.age_combo.findData(record.age) if record.age else 0
+        )
+        self.face_familiarity_combo.setCurrentIndex(
+            self.face_familiarity_combo.findData(record.face_familiarity)
+            if record.face_familiarity
+            else 0
+        )
+        self.reid_familiarity_combo.setCurrentIndex(
+            self.reid_familiarity_combo.findData(record.reid_familiarity)
+            if record.reid_familiarity
+            else 0
+        )
+        self.person_count_spin.setValue(record.person_count or 0)
+
     def _prepare_next_clip(self, saved_end_seconds: float) -> None:
         self._editing_index = None
         self.add_button.setText("添加片段")
@@ -3292,6 +3354,10 @@ class MainWindow(QMainWindow):
         self._rebuild_behavior_controls(remembered_behaviors)
         self.note_edit.clear()
         self._clear_event_rows()
+        self.age_combo.setCurrentIndex(0)
+        self.face_familiarity_combo.setCurrentIndex(0)
+        self.reid_familiarity_combo.setCurrentIndex(0)
+        self.person_count_spin.setValue(0)
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -3807,6 +3873,7 @@ class MainWindow(QMainWindow):
             if stratum_index >= 0:
                 self.stratum_combo.setCurrentIndex(stratum_index)
         self._populate_events(record.events)
+        self._restore_person_attributes(record)
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()

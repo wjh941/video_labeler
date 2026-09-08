@@ -346,6 +346,10 @@ def _record_to_dict(record: ClipRecord, *, include_review: bool = False) -> dict
             }
             for event in record.events
         ],
+        "age": record.age,
+        "face_familiarity": record.face_familiarity,
+        "reid_familiarity": record.reid_familiarity,
+        "person_count": record.person_count,
     }
     if include_review:
         document["review_status"] = record.review_status
@@ -392,6 +396,10 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         review_history=[dict(item) for item in document.get("review_history", [])],
         data_stratum=document.get("data_stratum", ""),
         events=_events_from_dicts(document.get("events", [])),
+        age=document.get("age", ""),
+        face_familiarity=document.get("face_familiarity", ""),
+        reid_familiarity=document.get("reid_familiarity", ""),
+        person_count=int(document.get("person_count", 0) or 0),
     )
 
 
@@ -576,6 +584,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "note", "review_status", "reviewer", "reviewed_at",
         "review_comment", "rejection_reason", "review_history",
         "data_stratum", "events",
+        "age", "face_familiarity", "reid_familiarity", "person_count",
     }
     if (
         not isinstance(document, dict)
@@ -597,6 +606,9 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "review_comment",
         "rejection_reason",
         "data_stratum",
+        "age",
+        "face_familiarity",
+        "reid_familiarity",
     ):
         history = document.get("review_history", [])
         if not isinstance(history, list) or not all(isinstance(item, dict) for item in history):
@@ -614,6 +626,8 @@ def _validated_record(document: Any) -> dict[str, Any]:
         raise ValueError("segment behaviors must be a list of strings")
     if not _is_int(document["sequence"]):
         raise ValueError("segment sequence must be an integer")
+    if not _is_int(document.get("person_count", 0)):
+        raise ValueError("segment person_count must be an integer")
     review_status = document.get("review_status", "pending")
     if review_status not in {"pending", "approved", "needs_fix", "rejected"}:
         raise ValueError("segment review_status is invalid")
@@ -637,6 +651,10 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "review_status": review_status,
         "data_stratum": document.get("data_stratum", ""),
         "events": [dict(event) for event in events],
+        "age": document.get("age", ""),
+        "face_familiarity": document.get("face_familiarity", ""),
+        "reid_familiarity": document.get("reid_familiarity", ""),
+        "person_count": int(document.get("person_count", 0) or 0),
     }
 
 
