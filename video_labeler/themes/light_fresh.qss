@@ -472,15 +472,16 @@ QHeaderView::section {
 }
 
 QSlider::groove:horizontal {
-    height: 7px;
-    background: #e5e6eb;
+    height: 9px;
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
     border-radius: 4px;
 }
 
 QSlider::sub-page:horizontal,
 QProgressBar::chunk {
-    background: #1677ff;
-    border-radius: 4px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2563eb, stop:1 #06b6d4);
+    border-radius: 5px;
 }
 
 QSlider::handle:horizontal {

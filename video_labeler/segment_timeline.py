@@ -53,14 +53,14 @@ class SegmentTimelineSlider(QSlider):
             return
         painter = QPainter(self)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#0EA5A4"))
+        painter.setBrush(QColor("#5eead4"))
         left = self._position_for_value(segment[0])
         right = self._position_for_value(segment[1])
         center_y = self.height() / 2
         painter.drawRoundedRect(
-            QRectF(left, center_y - 3, max(4, right - left), 6), 3, 3
+            QRectF(left, center_y - 4, max(4, right - left), 8), 4, 4
         )
-        painter.setBrush(QColor("#1677FF"))
+        painter.setBrush(QColor("#38bdf8"))
         for position in (left, right):
             painter.drawRoundedRect(
                 QRectF(position - 4, center_y - 7, 8, 14), 4, 4
