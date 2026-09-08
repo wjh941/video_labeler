@@ -552,8 +552,8 @@ class MainWindow(QMainWindow):
 
         # Keep the reference layout's most useful principle: video remains
         # permanently visible while the annotation side has more working width.
-        workspace_layout.addWidget(self.video_panel, 11)
-        workspace_layout.addWidget(self.annotation_workspace, 13)
+        workspace_layout.addWidget(self.video_panel, 13)
+        workspace_layout.addWidget(self.annotation_workspace, 11)
 
         self.task_table_dialog = QDialog(self)
         self.task_table_dialog.setWindowTitle("片段任务")
@@ -665,8 +665,8 @@ class MainWindow(QMainWindow):
         group.setObjectName("toolbarCard")
         self.project_settings_content = QWidget()
         layout = QVBoxLayout(self.project_settings_content)
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
 
         hero = QWidget()
         hero.setObjectName("projectHero")
@@ -1052,8 +1052,8 @@ class MainWindow(QMainWindow):
     def _build_clip_editor(self) -> QGroupBox:
         group = QGroupBox("片段标注")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
 
         # Compact review overview inspired by the reference right-hand cards:
         # keep the active source and progress visible while editing.
