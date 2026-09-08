@@ -1014,6 +1014,16 @@ class MainWindow(QMainWindow):
         self.seek_forward_button.setToolTip("前进 5 秒")
         self.set_start_button.setToolTip("设置当前帧为起始点（S）")
         self.set_end_button.setToolTip("设置当前帧为结束点（E）")
+        self.set_start_button.setStyleSheet(
+            "QPushButton { background-color: #16a34a; color: white; "
+            "font-weight: bold; border: none; border-radius: 4px; padding: 4px 10px; }"
+            "QPushButton:hover { background-color: #15803d; }"
+        )
+        self.set_end_button.setStyleSheet(
+            "QPushButton { background-color: #dc2626; color: white; "
+            "font-weight: bold; border: none; border-radius: 4px; padding: 4px 10px; }"
+            "QPushButton:hover { background-color: #b91c1c; }"
+        )
         self.speed_combo = QComboBox()
         for rate in PLAYBACK_RATE_PRESETS:
             self.speed_combo.addItem(f"{rate}x", rate)
@@ -1032,6 +1042,12 @@ class MainWindow(QMainWindow):
 
         transport_controls.addWidget(self.set_start_button)
         transport_controls.addWidget(self.set_end_button)
+        self.clip_range_label = QLabel("起 00:00:00.000 → 止 00:00:00.000")
+        self.clip_range_label.setObjectName("clipRangeLabel")
+        self.clip_range_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
+        transport_controls.addWidget(self.clip_range_label)
         transport_controls.addStretch(1)
         transport_controls.addWidget(self.play_button)
         transport_controls.addWidget(self.seek_back_button)
@@ -1886,6 +1902,8 @@ class MainWindow(QMainWindow):
         self.sequence_spin.valueChanged.connect(self._update_filename_preview)
         self.start_spin.valueChanged.connect(self._sync_timeline_segment_range)
         self.end_spin.valueChanged.connect(self._sync_timeline_segment_range)
+        self.start_spin.valueChanged.connect(self._update_clip_range_label)
+        self.end_spin.valueChanged.connect(self._update_clip_range_label)
         self.add_custom_behavior_tag_button.clicked.connect(
             self.add_custom_behavior_tag
         )
@@ -3523,6 +3541,13 @@ class MainWindow(QMainWindow):
 
     def _set_end_from_player(self) -> None:
         self.end_spin.setValue(self.player.position() / 1000)
+
+    def _update_clip_range_label(self, *_args: object) -> None:
+        if hasattr(self, "clip_range_label"):
+            self.clip_range_label.setText(
+                f"起 {format_seconds(self.start_spin.value())} → "
+                f"止 {format_seconds(self.end_spin.value())}"
+            )
 
     def _current_fps(self) -> float:
         video = self._active_project_video()
