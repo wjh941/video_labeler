@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGraphicsDropShadowEffect,
     QGraphicsScene,
     QGraphicsView,
@@ -609,6 +610,7 @@ class MainWindow(QMainWindow):
             self.seek_forward_button,
             self.set_start_button,
             self.set_end_button,
+            self.quick_add_button,
             self.add_button,
             self.remove_button,
             self.undo_button,
@@ -634,7 +636,7 @@ class MainWindow(QMainWindow):
         button.installEventFilter(self)
         self._button_hover_effects[button] = effect
         self._button_hover_animations[button] = animation
-        press = QPropertyAnimation(button, b"geometry", button)
+        press = QPropertyAnimation(effect, b"blurRadius", button)
         press.setDuration(150)
         press.setEasingCurve(QEasingCurve.Type.OutBack)
         self._button_press_animations[button] = press
@@ -645,8 +647,6 @@ class MainWindow(QMainWindow):
         animation = self._button_press_animations.get(button)
         if effect is None or animation is None:
             return
-        animation.setTargetObject(effect)
-        animation.setPropertyName(b"blurRadius")
         animation.stop()
         animation.setStartValue(effect.blurRadius())
         animation.setEndValue(19 if pressed else 10)
@@ -948,7 +948,13 @@ class MainWindow(QMainWindow):
         self.video_widget.setScene(self.video_scene)
         self.video_viewport = self.video_widget.viewport()
         self.video_viewport.installEventFilter(self)
-        layout.addWidget(self.video_widget, stretch=1)
+        self.video_stage = QWidget()
+        self.video_stage.setObjectName("videoStage")
+        video_stage_layout = QGridLayout(self.video_stage)
+        video_stage_layout.setContentsMargins(0, 0, 0, 0)
+        video_stage_layout.setSpacing(0)
+        video_stage_layout.addWidget(self.video_widget, 0, 0)
+        layout.addWidget(self.video_stage, stretch=1)
 
         self.video_info_panel = QWidget()
         self.video_info_panel.setObjectName("videoInfoPanel")
@@ -999,6 +1005,14 @@ class MainWindow(QMainWindow):
         self.seek_forward_button = QPushButton("+5s")
         self.set_start_button = QPushButton("设置起始点")
         self.set_end_button = QPushButton("设置结束点")
+        self.quick_add_button = QPushButton("✓ 完成片段")
+        self.quick_add_button.setObjectName("quickAddClipButton")
+        self.quick_add_button.setToolTip("使用当前起止时间立即添加片段")
+        self.quick_add_button.setStyleSheet(
+            "QPushButton { background-color: #2563eb; color: white; "
+            "font-weight: bold; border: none; border-radius: 4px; padding: 4px 10px; }"
+            "QPushButton:hover { background-color: #1d4ed8; }"
+        )
         standard_icons = self.style()
         self.play_button.setIcon(
             standard_icons.standardIcon(QStyle.StandardPixmap.SP_MediaPlay)
@@ -1042,6 +1056,7 @@ class MainWindow(QMainWindow):
 
         transport_controls.addWidget(self.set_start_button)
         transport_controls.addWidget(self.set_end_button)
+        transport_controls.addWidget(self.quick_add_button)
         self.clip_range_label = QLabel("起 00:00:00.000 → 止 00:00:00.000")
         self.clip_range_label.setObjectName("clipRangeLabel")
         self.clip_range_label.setSizePolicy(
@@ -1053,6 +1068,13 @@ class MainWindow(QMainWindow):
         transport_controls.addWidget(self.seek_back_button)
         transport_controls.addWidget(self.seek_forward_button)
         video_controls_layout.addLayout(transport_controls)
+        self.video_controls_panel.setStyleSheet(
+            "QWidget#videoControlsPanel { background-color: rgba(15, 23, 42, 218); "
+            "border: 1px solid rgba(148, 163, 184, 150); border-radius: 8px; }"
+        )
+        video_stage_layout.addWidget(
+            self.video_controls_panel, 0, 0, Qt.AlignmentFlag.AlignBottom
+        )
 
         playback_rate_layout = QHBoxLayout()
         playback_rate_layout.setSpacing(8)
@@ -1920,6 +1942,7 @@ class MainWindow(QMainWindow):
         self.export_tag_preset_button.clicked.connect(self.export_tag_preset)
 
         self.add_button.clicked.connect(self.add_or_update_clip)
+        self.quick_add_button.clicked.connect(self.add_or_update_clip)
         self.remove_button.clicked.connect(self.remove_selected_clip)
         self.undo_button.clicked.connect(self.undo_segments)
         self.redo_button.clicked.connect(self.redo_segments)
@@ -3538,9 +3561,11 @@ class MainWindow(QMainWindow):
 
     def _set_start_from_player(self) -> None:
         self.start_spin.setValue(self.player.position() / 1000)
+        self.set_end_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _set_end_from_player(self) -> None:
         self.end_spin.setValue(self.player.position() / 1000)
+        self.quick_add_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _update_clip_range_label(self, *_args: object) -> None:
         if hasattr(self, "clip_range_label"):
