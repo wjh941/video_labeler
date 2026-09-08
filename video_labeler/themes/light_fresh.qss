@@ -801,3 +801,9 @@ QLabel#annotationMetric {
     font-size: 11px;
     font-weight: 700;
 }
+
+QLabel#annotationWarning {
+    color: #b45309;
+    font-size: 11px;
+    font-weight: 600;
+}

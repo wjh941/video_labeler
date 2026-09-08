@@ -967,6 +967,8 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(QLabel("播放进度"))
         self.position_label = QLabel("00:00:00.000")
         self.duration_label = QLabel("00:00:00.000")
+        self.frame_info_label = QLabel("")
+        self.frame_info_label.setObjectName("mutedLabel")
         self.timeline_slider = SegmentTimelineSlider()
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.setTracking(False)
@@ -974,6 +976,7 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(self.position_label)
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
+        position_layout.addWidget(self.frame_info_label)
         video_controls_layout.addLayout(position_layout)
 
         transport_controls = QHBoxLayout()
@@ -1055,6 +1058,10 @@ class MainWindow(QMainWindow):
         self.annotation_overview_source.setWordWrap(True)
         overview_copy.addWidget(self.annotation_overview_title)
         overview_copy.addWidget(self.annotation_overview_source)
+        self.annotation_overview_warning = QLabel("")
+        self.annotation_overview_warning.setObjectName("annotationWarning")
+        self.annotation_overview_warning.setWordWrap(True)
+        overview_copy.addWidget(self.annotation_overview_warning)
         overview_layout.addLayout(overview_copy, stretch=1)
         self.annotation_overview_total = QLabel("0\n片段")
         self.annotation_overview_pending = QLabel("0\n待审核")
@@ -2115,6 +2122,7 @@ class MainWindow(QMainWindow):
             return
         try:
             create_backup(self._project_path, self._project_snapshot())
+            self._set_status("已自动备份工程")
         except (OSError, ValueError) as error:
             self._set_status(f"自动备份失败：{self._file_error_tip(error)}")
 
@@ -3171,6 +3179,29 @@ class MainWindow(QMainWindow):
         self._set_status("没有更多待审核片段")
         return False
 
+    def _jump_to_pending(self, direction: int) -> None:
+        """J/K 上/下一条待审核片段导航。"""
+        if not self.records:
+            self._set_status("没有待审核片段")
+            return
+        total = len(self.records)
+        current = self.task_table.currentRow()
+        if current < 0:
+            current = 0
+        for step in range(1, total + 1):
+            index = (current + direction * step) % total
+            if (
+                self.records[index].review_status == "pending"
+                and not self.task_table.isRowHidden(index)
+            ):
+                self.task_table.selectRow(index)
+                item = self.task_table.item(index, 0)
+                if item is not None:
+                    self.task_table.scrollToItem(item)
+                self._set_status(f"跳转到待审核片段 #{index + 1}")
+                return
+        self._set_status("没有更多待审核片段")
+
     def _review_current_selected(self, review_status: str) -> None:
         """Fast no-dialog review: 1 approved / 2 rejected / 3 pending."""
         if review_status not in {"pending", "approved", "rejected"}:
@@ -3266,12 +3297,20 @@ class MainWindow(QMainWindow):
         text = event.text()
         if (
             not self._text_input_focused()
-            and text.isdigit()
             and event.modifiers() == Qt.KeyboardModifier.NoModifier
         ):
-            self._dispatch_number_key(int(text))
-            event.accept()
-            return
+            if text.isdigit():
+                self._dispatch_number_key(int(text))
+                event.accept()
+                return
+            if text.lower() == "j":
+                self._jump_to_pending(-1)
+                event.accept()
+                return
+            if text.lower() == "k":
+                self._jump_to_pending(1)
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def toggle_playback(self) -> None:
@@ -3286,8 +3325,27 @@ class MainWindow(QMainWindow):
     def _set_end_from_player(self) -> None:
         self.end_spin.setValue(self.player.position() / 1000)
 
+    def _current_fps(self) -> float:
+        video = self._active_project_video()
+        if video is None or not video.metadata:
+            return 0.0
+        try:
+            fps = float(video.metadata.get("fps", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return fps if fps > 0 else 0.0
+
+    def _frame_position_text(self, milliseconds: int) -> str:
+        fps = self._current_fps()
+        if fps <= 0:
+            return ""
+        frame = int(round(milliseconds / 1000.0 * fps))
+        return f"帧 {frame} · {fps:g}fps"
+
     def _step_frame(self, direction: int) -> None:
-        self._seek_relative(33 * direction)
+        fps = self._current_fps()
+        step_ms = round(1000.0 / fps) if fps > 0 else 33
+        self._seek_relative(step_ms * direction)
 
     def _seek_relative(self, milliseconds: int) -> None:
         duration = self.player.duration()
@@ -3338,6 +3396,8 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(self.timeline_slider):
             self.timeline_slider.setValue(milliseconds)
         self.position_label.setText(format_seconds(milliseconds / 1000))
+        if hasattr(self, "frame_info_label"):
+            self.frame_info_label.setText(self._frame_position_text(milliseconds))
 
     def _update_duration(self, milliseconds: int) -> None:
         with QSignalBlocker(self.timeline_slider):
@@ -3841,6 +3901,41 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self.annotation_overview_source.setText("未选择记录")
+            warnings = self._current_video_quality_warnings()
+            if warnings:
+                self.annotation_overview_warning.setText(
+                    "⚠ " + "；".join(warnings[:2])
+                )
+                self.annotation_overview_warning.setToolTip("\n".join(warnings))
+            else:
+                self.annotation_overview_warning.setText("✓ 无异常")
+                self.annotation_overview_warning.setToolTip("")
+
+    def _current_video_quality_warnings(self) -> list[str]:
+        """轻量实时质量检测，仅读取数据，不修改任何标注结构。"""
+        warnings: list[str] = []
+        duration = 0.0
+        video = self._active_project_video()
+        if video is not None and video.metadata:
+            raw_duration = video.metadata.get("duration")
+            if isinstance(raw_duration, (int, float)):
+                duration = float(raw_duration)
+        for index, record in enumerate(self.records):
+            label = f"片段 {index + 1}"
+            if not record.behaviors:
+                warnings.append(f"{label} 未设置行为标签")
+            if duration > 0 and record.end_seconds > duration:
+                warnings.append(f"{label} 结束时间超过视频时长")
+            for previous_index, previous in enumerate(self.records[:index]):
+                if (
+                    record.start_seconds < previous.end_seconds
+                    and previous.start_seconds < record.end_seconds
+                ):
+                    warnings.append(
+                        f"{label} 与片段 {previous_index + 1} 时间重叠"
+                    )
+                    break
+        return warnings
 
     def _show_task_context_menu(self, position) -> None:
         item = self.task_table.itemAt(position)
