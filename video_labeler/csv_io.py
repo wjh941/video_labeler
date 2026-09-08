@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from typing import Sequence
 
-from .models import ClipRecord
+from .models import ClipRecord, EventRecord
 from .naming import parse_filename
 
 
@@ -14,7 +14,7 @@ FULL_CSV_FIELDS = (
     "source", "start_seconds", "end_seconds", "output", "behaviors",
     "polarity", "lighting", "sequence", "status", "error", "note",
     "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason",
-    "data_stratum"
+    "data_stratum", "events"
 )
 
 
@@ -46,6 +46,30 @@ def _format_seconds(value: float) -> str:
     hours, remainder = divmod(value, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{int(hours):02d}:{int(minutes):02d}:{seconds:06.3f}"
+
+
+def _parse_events_json(value: str) -> list[EventRecord]:
+    """Parse the JSON-encoded events column into EventRecord values."""
+    if not value or not value.strip():
+        return []
+    try:
+        items = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(items, list):
+        return []
+    events: list[EventRecord] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        events.append(
+            EventRecord(
+                event_type=str(item.get("event_type", "")),
+                start_time_ms=int(item.get("start_time_ms", 0) or 0),
+                end_time_ms=int(item.get("end_time_ms", 0) or 0),
+            )
+        )
+    return events
 
 
 def write_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
@@ -88,6 +112,17 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                 "review_comment": record.review_comment,
                 "rejection_reason": record.rejection_reason,
                 "data_stratum": record.data_stratum,
+                "events": json.dumps(
+                    [
+                        {
+                            "event_type": event.event_type,
+                            "start_time_ms": event.start_time_ms,
+                            "end_time_ms": event.end_time_ms,
+                        }
+                        for event in record.events
+                    ],
+                    ensure_ascii=False,
+                ),
             })
 
 
@@ -125,6 +160,7 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 review_comment=row.get("review_comment", ""),
                 rejection_reason=row.get("rejection_reason", ""),
                 data_stratum=row.get("data_stratum", ""),
+                events=_parse_events_json(row.get("events", "")),
             ))
     return records
 

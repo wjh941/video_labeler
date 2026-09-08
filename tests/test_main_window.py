@@ -294,7 +294,7 @@ def test_behavior_selector_click_keeps_summary_and_filename_in_sync(
     assert window.behavior_tag_combo.checked_tags() == (
         BEHAVIOR_LABELS[0],
     )
-    assert window.behavior_tag_combo.currentText() == "已选 1 项"
+    assert window.behavior_tag_combo.currentText() == f"已选 1 项：{BEHAVIOR_LABELS[0]}"
     assert BEHAVIOR_LABELS[0] in window.filename_preview.text()
 
 

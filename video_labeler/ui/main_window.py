@@ -104,6 +104,7 @@ from ..models import (
     STRATUM_VALUES,
     VIEW_TYPES,
     ClipRecord,
+    EventRecord,
     ProjectMetadata,
 )
 from ..naming import (
@@ -305,6 +306,7 @@ class BehaviorTagComboBox(QComboBox):
         model = QStandardItemModel(self)
         model.dataChanged.connect(self._on_model_data_changed)
         self.setModel(model)
+        self.view().setMinimumWidth(320)
         self.view().pressed.connect(self._toggle_index)
 
     def set_tags(
@@ -384,10 +386,13 @@ class BehaviorTagComboBox(QComboBox):
         self.selectionChanged.emit()
 
     def _update_summary(self) -> None:
-        selected_count = len(self.checked_tags())
-        self.setEditText(
-            f"已选 {selected_count} 项" if selected_count else "请选择行为标签"
-        )
+        selected_tags = self.checked_tags()
+        if not selected_tags:
+            self.setEditText("请选择行为标签")
+            return
+        preview = "、".join(selected_tags[:3])
+        suffix = f" 等 {len(selected_tags)} 项" if len(selected_tags) > 3 else ""
+        self.setEditText(f"已选 {len(selected_tags)} 项：{preview}{suffix}")
 
 
 class ProjectExportQueueDialog(QDialog):
@@ -1238,6 +1243,8 @@ class MainWindow(QMainWindow):
         labels_form = QFormLayout()
         self.polarity_combo = QComboBox()
         self.polarity_combo.addItems(POLARITIES)
+        self.polarity_combo.setToolTip("正向=pos，负向=neg")
+        self.polarity_combo.view().setMinimumWidth(180)
         self._configure_custom_combo(
             self.polarity_combo,
             "正负性",
@@ -1246,6 +1253,10 @@ class MainWindow(QMainWindow):
         )
         self.lighting_combo = QComboBox()
         self.lighting_combo.addItems(LIGHTING_VALUES)
+        self.lighting_combo.setToolTip(
+            "白天=daytime，夜间彩色=night_full_color，夜间黑白=night_black_white"
+        )
+        self.lighting_combo.view().setMinimumWidth(240)
         self._configure_custom_combo(
             self.lighting_combo,
             "光照",
@@ -1279,6 +1290,10 @@ class MainWindow(QMainWindow):
         self.polarity_group.set_content(polarity_content)
         layout.addWidget(self.polarity_group)
         self.stratum_combo = QComboBox()
+        self.stratum_combo.setToolTip(
+            "简单正向=easy_pos，困难正向=hard_pos，简单负向=easy_neg，"
+            "困难负向=hard_neg，待复核=pending_review"
+        )
         self.stratum_combo.addItem("不设置", "")
         for value in STRATUM_VALUES:
             self.stratum_combo.addItem(STRATUM_LABELS.get(value, value), value)
@@ -1292,6 +1307,23 @@ class MainWindow(QMainWindow):
         stratum_layout.addWidget(stratum_content)
         self.stratum_group.set_content(stratum_content)
         layout.addWidget(self.stratum_group)
+
+        self.events_group = CollapsibleGroupBox("样本内事件")
+        self.events_group.setChecked(False)
+        events_content = QWidget()
+        self.events_list_layout = QVBoxLayout(events_content)
+        self.events_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.events_list_layout.setSpacing(6)
+        self._event_rows: list[tuple[QComboBox, QSpinBox, QSpinBox, QWidget]] = []
+        self.add_event_button = QPushButton("+ 添加事件")
+        self.add_event_button.clicked.connect(self._add_event_row)
+        events_layout = QVBoxLayout(self.events_group)
+        events_layout.setContentsMargins(6, 6, 6, 6)
+        events_layout.addWidget(events_content)
+        events_layout.addWidget(self.add_event_button)
+        self.events_group.set_content(events_content)
+        layout.addWidget(self.events_group)
+
         self._update_label_group_titles()
 
         layout.addWidget(QLabel("生成的文件名"))
@@ -3098,6 +3130,7 @@ class MainWindow(QMainWindow):
             data_stratum=stratum,
             sequence=sequence,
             note=self.note_edit.text().strip(),
+            events=self._collect_events(),
         )
         before = list(self.records)
         is_new_record = self._editing_index is None
@@ -3157,11 +3190,96 @@ class MainWindow(QMainWindow):
         self.lighting_combo.setCurrentIndex(0)
         self.stratum_combo.setCurrentIndex(0)
         self.note_edit.clear()
+        self._clear_event_rows()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
         self.add_button.setText("添加片段")
         self._update_filename_preview()
+
+    def _add_event_row(
+        self,
+        event_type: str = "",
+        start_ms: int = 0,
+        end_ms: int = 0,
+    ) -> None:
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+        type_combo = QComboBox()
+        type_combo.setEditable(True)
+        type_combo.addItems(self._available_behavior_tags())
+        type_combo.setCurrentIndex(-1)
+        type_combo.lineEdit().setPlaceholderText("事件类型")
+        if event_type:
+            index = type_combo.findText(event_type)
+            if index < 0:
+                type_combo.addItem(event_type)
+                index = type_combo.count() - 1
+            type_combo.setCurrentIndex(index)
+        start_spin = QSpinBox()
+        start_spin.setRange(0, 99_999_999)
+        start_spin.setSingleStep(100)
+        start_spin.setValue(start_ms)
+        start_spin.setSuffix(" ms")
+        start_spin.setToolTip("相对样本起点的开始毫秒")
+        end_spin = QSpinBox()
+        end_spin.setRange(0, 99_999_999)
+        end_spin.setSingleStep(100)
+        end_spin.setValue(end_ms)
+        end_spin.setSuffix(" ms")
+        end_spin.setToolTip("相对样本起点的结束毫秒")
+        remove_button = QPushButton("×")
+        remove_button.setFixedWidth(28)
+        remove_button.setToolTip("删除此事件")
+        remove_button.clicked.connect(lambda: self._remove_event_row(row))
+        row_layout.addWidget(type_combo, stretch=2)
+        row_layout.addWidget(start_spin, stretch=1)
+        row_layout.addWidget(end_spin, stretch=1)
+        row_layout.addWidget(remove_button)
+        self.events_list_layout.addWidget(row)
+        self._event_rows.append((type_combo, start_spin, end_spin, row))
+
+    def _remove_event_row(self, row_widget: QWidget) -> None:
+        for entry in list(self._event_rows):
+            if entry[3] is row_widget:
+                self.events_list_layout.removeWidget(row_widget)
+                row_widget.deleteLater()
+                self._event_rows.remove(entry)
+                break
+
+    def _clear_event_rows(self) -> None:
+        while self.events_list_layout.count():
+            item = self.events_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._event_rows.clear()
+
+    def _collect_events(self) -> list[EventRecord]:
+        events: list[EventRecord] = []
+        for type_combo, start_spin, end_spin, _row in self._event_rows:
+            event_type = type_combo.currentText().strip()
+            if not event_type:
+                continue
+            events.append(
+                EventRecord(
+                    event_type=event_type,
+                    start_time_ms=start_spin.value(),
+                    end_time_ms=end_spin.value(),
+                )
+            )
+        return events
+
+    def _populate_events(self, events: Collection[EventRecord]) -> None:
+        self._clear_event_rows()
+        for event in events:
+            self._add_event_row(
+                event_type=event.event_type,
+                start_ms=event.start_time_ms,
+                end_ms=event.end_time_ms,
+            )
 
     def _prepare_next_clip(self, saved_end_seconds: float) -> None:
         self._editing_index = None
@@ -3173,6 +3291,7 @@ class MainWindow(QMainWindow):
         )
         self._rebuild_behavior_controls(remembered_behaviors)
         self.note_edit.clear()
+        self._clear_event_rows()
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
@@ -3687,6 +3806,7 @@ class MainWindow(QMainWindow):
             stratum_index = self.stratum_combo.findData(record.data_stratum)
             if stratum_index >= 0:
                 self.stratum_combo.setCurrentIndex(stratum_index)
+        self._populate_events(record.events)
         self.add_button.setText("更新片段")
         self.player.setPosition(int(record.start_seconds * 1000))
         self._update_filename_preview()

@@ -41,6 +41,13 @@ class ProjectMetadata:
 
 
 @dataclass
+class EventRecord:
+    event_type: str = ""
+    start_time_ms: int = 0
+    end_time_ms: int = 0
+
+
+@dataclass
 class ClipRecord:
     source: str
     start_seconds: float
@@ -60,3 +67,4 @@ class ClipRecord:
     rejection_reason: str = ""
     review_history: list[dict[str, str]] = field(default_factory=list)
     data_stratum: str = ""
+    events: list[EventRecord] = field(default_factory=list)

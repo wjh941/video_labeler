@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from video_labeler.models import BEHAVIOR_LABELS, ClipRecord
+from video_labeler.models import BEHAVIOR_LABELS, ClipRecord, EventRecord
 from video_labeler.naming import normalize_label_token
 
 
@@ -338,11 +338,37 @@ def _record_to_dict(record: ClipRecord, *, include_review: bool = False) -> dict
         "error": record.error,
         "note": record.note,
         "data_stratum": record.data_stratum,
+        "events": [
+            {
+                "event_type": event.event_type,
+                "start_time_ms": event.start_time_ms,
+                "end_time_ms": event.end_time_ms,
+            }
+            for event in record.events
+        ],
     }
     if include_review:
         document["review_status"] = record.review_status
     return document
 
+
+
+def _events_from_dicts(items: Any) -> list[EventRecord]:
+    """Parse a validated list of event objects into EventRecord values."""
+    events: list[EventRecord] = []
+    if not isinstance(items, list):
+        return events
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        events.append(
+            EventRecord(
+                event_type=str(item.get("event_type", "")),
+                start_time_ms=int(item.get("start_time_ms", 0) or 0),
+                end_time_ms=int(item.get("end_time_ms", 0) or 0),
+            )
+        )
+    return events
 
 
 def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
@@ -365,6 +391,7 @@ def _record_from_dict(document: dict[str, Any]) -> ClipRecord:
         rejection_reason=document.get("rejection_reason", ""),
         review_history=[dict(item) for item in document.get("review_history", [])],
         data_stratum=document.get("data_stratum", ""),
+        events=_events_from_dicts(document.get("events", [])),
     )
 
 
@@ -548,7 +575,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
     optional_keys = {
         "note", "review_status", "reviewer", "reviewed_at",
         "review_comment", "rejection_reason", "review_history",
-        "data_stratum",
+        "data_stratum", "events",
     }
     if (
         not isinstance(document, dict)
@@ -590,6 +617,11 @@ def _validated_record(document: Any) -> dict[str, Any]:
     review_status = document.get("review_status", "pending")
     if review_status not in {"pending", "approved", "needs_fix", "rejected"}:
         raise ValueError("segment review_status is invalid")
+    events = document.get("events", [])
+    if not isinstance(events, list) or not all(
+        isinstance(event, dict) for event in events
+    ):
+        raise ValueError("segment events must be a list of objects")
     return {
         "source": document["source"],
         "start_seconds": float(document["start_seconds"]),
@@ -604,6 +636,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "note": document.get("note", ""),
         "review_status": review_status,
         "data_stratum": document.get("data_stratum", ""),
+        "events": [dict(event) for event in events],
     }
 
 
