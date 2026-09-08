@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -468,6 +469,7 @@ class MainWindow(QMainWindow):
             QPushButton, QPropertyAnimation
         ] = {}
         self._button_press_animations: dict[QPushButton, QPropertyAnimation] = {}
+        self._utility_shortcuts: list[QShortcut] = []
         self.historical_behavior_tags: tuple[str, ...] = ()
         self.historical_tag_labels: dict[str, QLabel] = {}
 
@@ -1379,6 +1381,9 @@ class MainWindow(QMainWindow):
         self.task_table.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.task_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.task_table.customContextMenuRequested.connect(self._show_task_context_menu)
+        self.task_table.setToolTip("双击编辑；右键打开快捷操作；Ctrl/Shift 可多选")
         self.task_table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
@@ -1574,15 +1579,18 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
         self.status_label = QLabel("就绪")
+        self.annotation_stats_label = QLabel("片段 0 · 待审核 0")
+        self.annotation_stats_label.setObjectName("annotationStats")
         self.shortcut_hint_label = QLabel(
             "快捷键：空格 播放/暂停，A/D 前后帧，S/E 设置起止点，Del 删除，"
-            "Ctrl+Z/Y 撤销/重做，Ctrl+S 保存工程"
+            "Ctrl+Z/Y 撤销/重做，Ctrl+Enter 确认，Ctrl+Shift+E 快速导出"
         )
         self.shortcut_hint_label.setWordWrap(True)
 
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.progress_bar, stretch=1)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.annotation_stats_label)
         layout.addWidget(self.shortcut_hint_label)
         return layout
 
@@ -1801,6 +1809,24 @@ class MainWindow(QMainWindow):
         self.copy_log_button.clicked.connect(self.copy_log)
         self.clear_log_button.clicked.connect(self.clear_log)
         self._register_shortcuts()
+        self._register_utility_shortcuts()
+
+    def _register_utility_shortcuts(self) -> None:
+        """Keep high-frequency utility actions available without changing saved bindings."""
+        actions: tuple[tuple[str, Callable[[], None]], ...] = (
+            ("Ctrl+Enter", self.add_or_update_clip),
+            ("Escape", self.clear_editor),
+            ("Ctrl+Shift+E", self.start_export),
+        )
+        for sequence, callback in actions:
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(callback)
+            self._utility_shortcuts.append(shortcut)
+        select_all = QShortcut(QKeySequence("Ctrl+A"), self.task_table)
+        select_all.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        select_all.activated.connect(self.task_table.selectAll)
+        self._utility_shortcuts.append(select_all)
 
     def _register_shortcuts(self) -> None:
         callbacks: dict[str, Callable[[], None]] = {
@@ -2772,6 +2798,11 @@ class MainWindow(QMainWindow):
     def _sync_timeline_segment_range(self, *_args: object) -> None:
         if not hasattr(self, "timeline_slider"):
             return
+        self.timeline_slider.set_segment_ranges([
+            (round(record.start_seconds * 1000), round(record.end_seconds * 1000))
+            for record in self.records
+            if record.source == self.source_name
+        ])
         self.timeline_slider.set_segment_range(
             round(self.start_spin.value() * 1000),
             round(self.end_spin.value() * 1000),
@@ -3221,6 +3252,9 @@ class MainWindow(QMainWindow):
                     self.task_table.setItem(row, column, item)
         self._sync_filter_options()
         self._apply_table_filters()
+        self._update_annotation_stats()
+        if hasattr(self, "timeline_slider"):
+            self._sync_timeline_segment_range()
 
     def _sync_filter_options(self) -> None:
         current_behavior = self.behavior_filter_combo.currentData()
@@ -3335,13 +3369,16 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _apply_status_color(item: QTableWidgetItem, status: str) -> None:
         colors = {
-            "ok": "#2dd4bf",
-            "skip": "#fbbf24",
-            "fail": "#fb7185",
-            "canceled": "#94a3b8",
-            "queued": "#cbd5e1",
+            "ok": ("#047857", "#ecfdf5"),
+            "skip": ("#a16207", "#fefce8"),
+            "fail": ("#be123c", "#fff1f2"),
+            "canceled": ("#64748b", "#f1f5f9"),
+            "queued": ("#0369a1", "#f0f9ff"),
         }
-        item.setForeground(QColor(colors.get(status, "#cbd5e1")))
+        foreground, background = colors.get(status, ("#64748b", "#f8fafc"))
+        item.setForeground(QColor(foreground))
+        item.setBackground(QColor(background))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _load_selected_clip(self) -> None:
         selected = self.task_table.selectionModel().selectedRows()
@@ -3597,6 +3634,66 @@ class MainWindow(QMainWindow):
             )
         except ValueError as error:
             self._show_error("批量修改失败", str(error))
+
+    def _update_annotation_stats(self) -> None:
+        """Expose compact progress feedback without changing annotation data."""
+        records = [record for record in self.records if record.source == self.source_name]
+        total = len(records)
+        approved = sum(record.review_status == "approved" for record in records)
+        pending = sum(record.review_status == "pending" for record in records)
+        self.annotation_stats_label.setText(
+            f"片段 {total} · 待审核 {pending} · 已通过 {approved}"
+        )
+
+    def _show_task_context_menu(self, position) -> None:
+        item = self.task_table.itemAt(position)
+        if item is not None and item.row() not in self._selected_record_indexes():
+            self.task_table.selectRow(item.row())
+        indexes = self._selected_record_indexes()
+        if not indexes:
+            return
+        menu = QMenu(self.task_table)
+        edit_action = menu.addAction("编辑选中片段")
+        clone_action = menu.addAction("克隆首个选中片段")
+        menu.addSeparator()
+        delete_action = menu.addAction(f"删除选中 ({len(indexes)})")
+        chosen = menu.exec(self.task_table.viewport().mapToGlobal(position))
+        if chosen is edit_action:
+            self.task_table.selectRow(indexes[0])
+            self._load_selected_clip()
+            self.start_spin.setFocus()
+        elif chosen is clone_action:
+            self._clone_selected_record(indexes[0])
+        elif chosen is delete_action:
+            self._delete_selected_records()
+
+    def _clone_selected_record(self, index: int) -> None:
+        if not 0 <= index < len(self.records):
+            return
+        original = self.records[index]
+        sequence = next_sequence([record.sequence for record in self.records])
+        parsed = parse_filename(original.output)
+        output = original.output
+        if parsed is not None:
+            output = build_filename(
+                parsed.metadata, original.behaviors, original.polarity,
+                original.lighting, sequence
+            )
+        else:
+            suffix = Path(original.output).suffix or ".mp4"
+            output = f"{Path(original.output).stem}-copy-{sequence:03d}{suffix}"
+        clone = replace(
+            original, sequence=sequence, output=output, status="queued", error=""
+        )
+        before = list(self.records)
+        self.records.append(clone)
+        history = self._active_history(create=True)
+        if history is not None:
+            history.push(before, self.records)
+        self._refresh_table()
+        self._mark_project_dirty()
+        self.task_table.selectRow(len(self.records) - 1)
+        self._set_status(f"已克隆片段 {index + 1}，编号 {sequence:03d}")
 
     def _delete_selected_records(self) -> None:
         indexes = self._selected_record_indexes()

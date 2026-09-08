@@ -15,6 +15,7 @@ class SegmentTimelineSlider(QSlider):
         self._segment_start: int | None = None
         self._segment_end: int | None = None
         self._dragged_edge: str | None = None
+        self._segment_ranges: list[tuple[int, int]] = []
         self.setMouseTracking(True)
         self.setToolTip("拖动片段左右边缘调整起止时间")
 
@@ -28,6 +29,18 @@ class SegmentTimelineSlider(QSlider):
         self._segment_start = start
         self._segment_end = end
         self.update()
+
+    def set_segment_ranges(self, ranges: list[tuple[int, int]]) -> None:
+        low, high = self.minimum(), self.maximum()
+        normalized = []
+        for start, end in ranges:
+            start = max(low, min(high, int(start)))
+            end = max(start, min(high, int(end)))
+            if end > start:
+                normalized.append((start, end))
+        if normalized != self._segment_ranges:
+            self._segment_ranges = normalized
+            self.update()
 
     def segment_range(self) -> tuple[int, int] | None:
         if self._segment_start is None or self._segment_end is None:
@@ -49,22 +62,31 @@ class SegmentTimelineSlider(QSlider):
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         segment = self.segment_range()
-        if segment is None or segment[1] <= segment[0]:
+        if (segment is None or segment[1] <= segment[0]) and not self._segment_ranges:
             return
         painter = QPainter(self)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#5eead4"))
-        left = self._position_for_value(segment[0])
-        right = self._position_for_value(segment[1])
-        center_y = self.height() / 2
-        painter.drawRoundedRect(
-            QRectF(left, center_y - 4, max(4, right - left), 8), 4, 4
-        )
-        painter.setBrush(QColor("#38bdf8"))
-        for position in (left, right):
+        groove = self._groove_rect()
+        # Show existing annotations as quiet context bands; the active range
+        # is painted above them in a brighter color below.
+        for start, end in self._segment_ranges:
+            left = self._position_for_value(start)
+            right = self._position_for_value(end)
+            painter.setBrush(QColor(56, 189, 248, 72))
+            painter.drawRoundedRect(QRectF(left, groove.center().y() - 3, max(3, right - left), 6), 3, 3)
+        if segment is not None and segment[1] > segment[0]:
+            painter.setBrush(QColor("#5eead4"))
+            left = self._position_for_value(segment[0])
+            right = self._position_for_value(segment[1])
+            center_y = self.height() / 2
             painter.drawRoundedRect(
-                QRectF(position - 4, center_y - 7, 8, 14), 4, 4
+                QRectF(left, center_y - 4, max(4, right - left), 8), 4, 4
             )
+            painter.setBrush(QColor("#38bdf8"))
+            for position in (left, right):
+                painter.drawRoundedRect(
+                    QRectF(position - 4, center_y - 7, 8, 14), 4, 4
+                )
 
     def mousePressEvent(self, event) -> None:
         segment = self.segment_range()
