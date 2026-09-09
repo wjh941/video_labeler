@@ -938,7 +938,7 @@ class MainWindow(QMainWindow):
         )
         self.video_scene.addItem(self.video_item)
         self.video_placeholder_item = self.video_scene.addSimpleText(
-            "导入视频后开始标注"
+            "请点击“导入视频”开始"
         )
         self.video_placeholder_item.setBrush(QColor("#B9C8D9"))
         self.video_placeholder_item.setAcceptedMouseButtons(
@@ -955,9 +955,9 @@ class MainWindow(QMainWindow):
         video_info_layout = QHBoxLayout(self.video_info_panel)
         video_info_layout.setContentsMargins(12, 9, 12, 9)
         video_info_layout.setSpacing(8)
-        self.video_info_title = QLabel("未选择视频")
+        self.video_info_title = QLabel("等待导入视频")
         self.video_info_title.setObjectName("videoInfoTitle")
-        self.video_info_meta = QLabel("导入视频后开始标注")
+        self.video_info_meta = QLabel("支持直接播放、拖动进度和设置片段起止点")
         self.video_info_meta.setObjectName("videoInfoMeta")
         video_info_layout.addWidget(self.video_info_title)
         video_info_layout.addStretch(1)
@@ -1098,7 +1098,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.annotation_overview)
 
         source_layout = QHBoxLayout()
-        self.source_label = QLabel("未选择视频")
+        self.source_label = QLabel("等待导入视频")
         self.source_label.setWordWrap(True)
         self.source_label.setObjectName("mutedLabel")
         self.project_video_combo = QComboBox()
@@ -2267,9 +2267,9 @@ class MainWindow(QMainWindow):
         self.source_path = None
         self.source_name = ""
         self._editing_index = None
-        self.source_label.setText("未选择视频")
-        self.video_info_title.setText("未选择视频")
-        self.video_info_meta.setText("导入视频后开始标注")
+        self.source_label.setText("等待导入视频")
+        self.video_info_title.setText("等待导入视频")
+        self.video_info_meta.setText("支持直接播放、拖动进度和设置片段起止点")
         self.project_video_combo.clear()
         self.project_video_combo.setEnabled(False)
         self._set_media_source(None)
@@ -2432,9 +2432,9 @@ class MainWindow(QMainWindow):
             self.records = []
             self.source_path = None
             self.source_name = ""
-            self.source_label.setText("未选择视频")
-            self.video_info_title.setText("未选择视频")
-            self.video_info_meta.setText("导入视频后开始标注")
+            self.source_label.setText("等待导入视频")
+            self.video_info_title.setText("等待导入视频")
+            self.video_info_meta.setText("支持直接播放、拖动进度和设置片段起止点")
             self._sync_project_video_combo()
             self._refresh_table()
             self._set_media_source(None)
@@ -3715,10 +3715,10 @@ class MainWindow(QMainWindow):
             QMediaPlayer.MediaStatus.BufferingMedia,
             QMediaPlayer.MediaStatus.StalledMedia,
         ):
-            self.video_placeholder_item.setText("正在加载视频…")
+            self.video_placeholder_item.setText("正在准备视频…")
             self.video_placeholder_item.setVisible(True)
         elif status == QMediaPlayer.MediaStatus.NoMedia:
-            self.video_placeholder_item.setText("导入视频后开始标注")
+            self.video_placeholder_item.setText("请点击“导入视频”开始")
             self.video_placeholder_item.setVisible(True)
         elif status in (
             QMediaPlayer.MediaStatus.LoadedMedia,

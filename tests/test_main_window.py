@@ -2768,11 +2768,11 @@ def test_video_scene_overlay_tracks_empty_loading_and_loaded_states(qt_app):
 
     overlay = window.video_placeholder_item
     assert overlay.isVisible()
-    assert overlay.text() == "导入视频后开始标注"
+    assert overlay.text() == "请点击“导入视频”开始"
 
     window._update_video_placeholder(QMediaPlayer.MediaStatus.LoadingMedia)
     assert overlay.isVisible()
-    assert overlay.text() == "正在加载视频…"
+    assert overlay.text() == "正在准备视频…"
 
     window._update_video_placeholder(QMediaPlayer.MediaStatus.LoadedMedia)
     assert not overlay.isVisible()
