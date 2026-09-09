@@ -916,6 +916,7 @@ class MainWindow(QMainWindow):
 
         self.video_widget = QGraphicsView()
         self.video_widget.setMinimumHeight(280)
+        self.video_widget.setMaximumHeight(360)
         self.video_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
