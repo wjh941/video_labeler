@@ -552,9 +552,7 @@ class MainWindow(QMainWindow):
 
         # Keep the reference layout's most useful principle: video remains
         # permanently visible while the annotation side has more working width.
-        workspace_layout.addWidget(
-            self.video_panel, 11, Qt.AlignmentFlag.AlignTop
-        )
+        workspace_layout.addWidget(self.video_panel, 11)
         workspace_layout.addWidget(self.annotation_workspace, 13)
 
         self.task_table_dialog = QDialog(self)
@@ -918,7 +916,6 @@ class MainWindow(QMainWindow):
 
         self.video_widget = QGraphicsView()
         self.video_widget.setMinimumHeight(280)
-        self.video_widget.setMaximumHeight(400)
         self.video_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
