@@ -2576,7 +2576,12 @@ def test_task_table_keeps_a_usable_page_section(qt_app):
     window.show()
     qt_app.processEvents()
 
-    assert window.task_panel.isChecked()
+    assert not window.task_panel.isChecked()
+
+    window.task_panel.setChecked(True)
+    QTest.qWait(400)
+    qt_app.processEvents()
+
     assert window.task_table.height() >= 200
     assert window.task_panel.parentWidget() is window.workspace_content
 
@@ -2841,6 +2846,12 @@ def test_narrow_window_keeps_embedded_table_until_user_detaches_it(qt_app):
     window = MainWindow()
     window.resize(1120, 720)
     window.show()
+    qt_app.processEvents()
+
+    assert not window.task_panel.isChecked()
+
+    window.task_panel.setChecked(True)
+    QTest.qWait(400)
     qt_app.processEvents()
 
     assert window.task_panel.parentWidget() is window.workspace_content

@@ -621,6 +621,41 @@ QGroupBox#operationLogPanel {
     padding: 16px;
     margin-top: 18px;
 }
+QGroupBox#annotationCard {
+    padding: 10px;
+    margin-top: 14px;
+}
+QGroupBox[compact="true"] {
+    margin-top: 5px;
+    padding: 3px 8px;
+}
+QGroupBox#toolbarCard[compact="true"],
+QGroupBox#taskCard[compact="true"],
+QGroupBox#operationLogPanel[compact="true"],
+QGroupBox#annotationCard[compact="true"] {
+    padding: 6px 10px;
+    margin-top: 8px;
+}
+QGroupBox#videoCard {
+    padding: 10px;
+    margin-top: 12px;
+}
+QGroupBox#annotationCard QLineEdit,
+QGroupBox#annotationCard QComboBox,
+QGroupBox#annotationCard QSpinBox,
+QGroupBox#annotationCard QDoubleSpinBox {
+    min-height: 26px;
+    padding: 3px 8px;
+}
+QGroupBox#annotationCard QPushButton {
+    min-height: 28px;
+    padding: 4px 10px;
+}
+QGroupBox#annotationCard QPushButton#primaryButton,
+QGroupBox#annotationCard QPushButton#addClipButton {
+    min-height: 30px;
+    padding: 4px 12px;
+}
 QGroupBox#toolbarCard::title,
 QGroupBox#videoCard::title,
 QGroupBox#annotationCard::title,
@@ -788,11 +823,11 @@ QLabel#annotationOverviewTitle {
 }
 QLabel#annotationOverviewSource {
     color: #0f172a;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
 }
 QLabel#annotationMetric {
-    min-height: 42px;
+    min-height: 30px;
     padding: 4px 7px;
     background: #ffffff;
     border: 1px solid #dbe4ef;

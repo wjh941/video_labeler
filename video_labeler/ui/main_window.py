@@ -203,6 +203,7 @@ class CollapsibleGroupBox(QGroupBox):
         super().__init__(title, parent)
         self.setCheckable(True)
         self.setChecked(True)
+        self.setProperty("compact", "true")
         self._content: QWidget | None = None
         self._content_animation: QPropertyAnimation | None = None
         self._chevron_rotation = 90.0
@@ -219,6 +220,7 @@ class CollapsibleGroupBox(QGroupBox):
     def set_content(self, content: QWidget) -> None:
         self._content = content
         content.setVisible(self.isChecked())
+        QTimer.singleShot(0, self._apply_collapsed_height)
         content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
         self.chevronRotation = 90.0 if self.isChecked() else 0.0
         self._content_animation = QPropertyAnimation(
@@ -247,6 +249,7 @@ class CollapsibleGroupBox(QGroupBox):
 
         self._animation.stop()
         if expanded:
+            self.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
             self._content.setVisible(True)
             self._content.setMinimumHeight(0)
             start_height = 0
@@ -269,15 +272,24 @@ class CollapsibleGroupBox(QGroupBox):
         self._chevron_animation.setEndValue(90.0 if expanded else 0.0)
         self._animation.start()
 
+    def _apply_collapsed_height(self) -> None:
+        """Keep a collapsed card at its title height instead of stretching."""
+        if self.isChecked():
+            self.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
+        else:
+            self.setMaximumHeight(self.sizeHint().height())
+
     def _finish_content_animation(self) -> None:
         if self._content is None:
             return
         if self.isChecked():
+            self.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
             self._content.setMaximumHeight(self._UNRESTRICTED_HEIGHT)
             self._content.setMinimumHeight(self._content.sizeHint().height())
             self._content.updateGeometry()
         else:
             self._content.setVisible(False)
+            self._apply_collapsed_height()
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
@@ -552,7 +564,9 @@ class MainWindow(QMainWindow):
 
         # Keep the reference layout's most useful principle: video remains
         # permanently visible while the annotation side has more working width.
-        workspace_layout.addWidget(self.video_panel, 11)
+        workspace_layout.addWidget(
+            self.video_panel, 11, Qt.AlignmentFlag.AlignTop
+        )
         workspace_layout.addWidget(self.annotation_workspace, 13)
 
         self.task_table_dialog = QDialog(self)
@@ -952,6 +966,11 @@ class MainWindow(QMainWindow):
 
         self.video_info_panel = QWidget()
         self.video_info_panel.setObjectName("videoInfoPanel")
+        self.video_info_panel.setMinimumHeight(28)
+        self.video_info_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         video_info_layout = QHBoxLayout(self.video_info_panel)
         video_info_layout.setContentsMargins(8, 4, 8, 4)
         video_info_layout.setSpacing(8)
@@ -972,6 +991,11 @@ class MainWindow(QMainWindow):
 
         self.video_controls_panel = QWidget()
         self.video_controls_panel.setObjectName("videoControlsPanel")
+        self.video_controls_panel.setMinimumHeight(46)
+        self.video_controls_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         video_controls_layout = QVBoxLayout(self.video_controls_panel)
         video_controls_layout.setContentsMargins(8, 4, 8, 4)
         video_controls_layout.setSpacing(4)
@@ -1063,15 +1087,15 @@ class MainWindow(QMainWindow):
     def _build_clip_editor(self) -> QGroupBox:
         group = QGroupBox("片段标注")
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
 
         # Compact review overview inspired by the reference right-hand cards:
         # keep the active source and progress visible while editing.
         self.annotation_overview = QFrame()
         self.annotation_overview.setObjectName("annotationOverview")
         overview_layout = QHBoxLayout(self.annotation_overview)
-        overview_layout.setContentsMargins(10, 8, 10, 8)
+        overview_layout.setContentsMargins(10, 5, 10, 5)
         overview_layout.setSpacing(8)
         overview_copy = QVBoxLayout()
         overview_copy.setSpacing(1)
@@ -1517,7 +1541,7 @@ class MainWindow(QMainWindow):
 
     def _build_task_table(self) -> CollapsibleGroupBox:
         group = CollapsibleGroupBox("片段任务")
-        group.setChecked(True)
+        group.setChecked(False)
         group.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -1703,6 +1727,12 @@ class MainWindow(QMainWindow):
         return group
 
     def _show_task_table_dialog(self) -> None:
+        if not self.task_panel.isChecked():
+            # A collapsed QGroupBox disables its children; expand first so the
+            # detached table stays interactive.
+            self.task_panel.setChecked(True)
+            self.task_panel._animation.stop()
+            self.task_panel._finish_content_animation()
         if self.task_panel.parentWidget() is self.task_table_dialog:
             self.task_table_dialog.raise_()
             self.task_table_dialog.activateWindow()
