@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider
 
 
@@ -59,14 +59,59 @@ class SegmentTimelineSlider(QSlider):
         self.set_segment_range(start, end)
         self.segment_range_changed.emit(start, end)
 
+    _TICK_STEPS = (
+        1_000,
+        2_000,
+        5_000,
+        10_000,
+        15_000,
+        30_000,
+        60_000,
+        120_000,
+        300_000,
+        600_000,
+        900_000,
+        1_800_000,
+        3_600_000,
+        7_200_000,
+        10_800_000,
+        21_600_000,
+    )
+
+    def _draw_time_ticks(self, painter: QPainter, groove) -> None:
+        """Draw absolute-time ticks so long videos stay navigable."""
+        span = self.maximum() - self.minimum()
+        if span <= 0 or groove.width() <= 0:
+            return
+        rough = span * 90.0 / groove.width()
+        interval = next(
+            (step for step in self._TICK_STEPS if step >= rough),
+            self._TICK_STEPS[-1],
+        )
+        painter.setPen(QPen(QColor(148, 163, 184), 1))
+        font = QFont(painter.font())
+        font.setPointSize(6)
+        painter.setFont(font)
+        value = interval
+        while value < self.maximum():
+            x = self._position_for_value(value)
+            painter.drawLine(int(x), 11, int(x), 15)
+            painter.drawText(
+                QRectF(x - 34, 0, 68, 11),
+                Qt.AlignmentFlag.AlignCenter,
+                self._format_time(value),
+            )
+            value += interval
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
+        painter = QPainter(self)
+        groove = self._groove_rect()
+        self._draw_time_ticks(painter, groove)
         segment = self.segment_range()
         if (segment is None or segment[1] <= segment[0]) and not self._segment_ranges:
             return
-        painter = QPainter(self)
         painter.setPen(Qt.PenStyle.NoPen)
-        groove = self._groove_rect()
         # Show existing annotations as quiet context bands; the active range
         # is painted above them in a brighter color below.
         for start, end in self._segment_ranges:
@@ -92,12 +137,12 @@ class SegmentTimelineSlider(QSlider):
             font.setPointSize(7)
             painter.setFont(font)
             painter.drawText(
-                QRectF(left - 52, center_y + 8, 104, 14),
+                QRectF(left - 52, center_y + 7, 104, 12),
                 Qt.AlignmentFlag.AlignCenter,
                 self._format_time(segment[0]),
             )
             painter.drawText(
-                QRectF(right - 52, center_y + 8, 104, 14),
+                QRectF(right - 52, center_y + 7, 104, 12),
                 Qt.AlignmentFlag.AlignCenter,
                 self._format_time(segment[1]),
             )

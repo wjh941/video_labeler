@@ -541,6 +541,12 @@ class MainWindow(QMainWindow):
         workspace_layout.setContentsMargins(0, 0, 0, 0)
         workspace_layout.setSpacing(12)
 
+        self.media_column = QWidget()
+        self.media_column.setObjectName("mediaColumn")
+        self.media_column_layout = QVBoxLayout(self.media_column)
+        self.media_column_layout.setContentsMargins(0, 0, 0, 0)
+        self.media_column_layout.setSpacing(8)
+
         self.video_panel = self._build_video_panel()
         self.video_panel.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -571,9 +577,8 @@ class MainWindow(QMainWindow):
 
         # Keep the reference layout's most useful principle: video remains
         # permanently visible while the annotation side has more working width.
-        workspace_layout.addWidget(
-            self.video_panel, 11, Qt.AlignmentFlag.AlignTop
-        )
+        self.media_column_layout.addWidget(self.video_panel)
+        workspace_layout.addWidget(self.media_column, 11)
         workspace_layout.addWidget(self.annotation_workspace, 13)
 
         self.task_table_dialog = QDialog(self)
@@ -587,7 +592,7 @@ class MainWindow(QMainWindow):
         self.page_layout.addWidget(self.workspace_row)
         self.page_layout.addWidget(self.task_panel)
         self.operation_log_group = self._build_log_panel()
-        self.page_layout.addWidget(self.operation_log_group)
+        self.media_column_layout.addWidget(self.operation_log_group, stretch=1)
         self.page_layout.addLayout(self._build_export_status())
 
         for card in (
@@ -1016,7 +1021,7 @@ class MainWindow(QMainWindow):
         self.timeline_slider = SegmentTimelineSlider()
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.setTracking(False)
-        self.timeline_slider.setMinimumHeight(32)
+        self.timeline_slider.setMinimumHeight(40)
         position_layout.addWidget(self.position_label)
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
@@ -1738,7 +1743,7 @@ class MainWindow(QMainWindow):
     def _build_log_panel(self) -> CollapsibleGroupBox:
         group = CollapsibleGroupBox("操作日志")
         group.setObjectName("operationLogPanel")
-        group.setChecked(False)
+        group.setChecked(True)
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -1746,7 +1751,13 @@ class MainWindow(QMainWindow):
 
         self.log_panel = QPlainTextEdit()
         self.log_panel.setReadOnly(True)
-        self.log_panel.setMinimumHeight(130)
+        self.log_panel.setMinimumHeight(110)
+        # The text edit default size hint (~256px) would inflate the media
+        # column; let the layout stretch decide the log height instead.
+        self.log_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Ignored,
+        )
         self.log_panel.document().setMaximumBlockCount(1000)
         layout.addWidget(self.log_panel)
 
