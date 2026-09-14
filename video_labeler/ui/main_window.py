@@ -1510,12 +1510,29 @@ class MainWindow(QMainWindow):
         if hasattr(self, "output_folder_label"):
             self._set_output_folder_display()
 
+    def _sync_video_preview_height(self, width: int) -> None:
+        """Match the preview height to the video aspect so it never letterboxes."""
+        if width <= 0 or not hasattr(self, "video_widget"):
+            return
+        native = self.video_item.nativeSize()
+        if native.isValid() and native.height() > 0 and native.width() > 0:
+            aspect = native.width() / native.height()
+        else:
+            aspect = 16.0 / 9.0
+        target = int(round(width / aspect))
+        target = max(240, min(360, target))
+        if abs(self.video_widget.maximumHeight() - target) > 1:
+            self.video_widget.setMaximumHeight(target)
+            # Re-fit the scene/video item once the layout applied the new cap.
+            QTimer.singleShot(0, self._resize_video_item)
+
     def _resize_video_item(self) -> None:
         if not hasattr(self, "video_viewport"):
             return
         size = self.video_viewport.size()
         self.video_scene.setSceneRect(0, 0, size.width(), size.height())
         self.video_item.setSize(QSizeF(size))
+        self._sync_video_preview_height(size.width())
         if hasattr(self, "video_placeholder_item"):
             bounds = self.video_placeholder_item.boundingRect()
             self.video_placeholder_item.setPos(
@@ -1726,6 +1743,13 @@ class MainWindow(QMainWindow):
         group.set_content(content)
         return group
 
+    def _toggle_task_table(self) -> None:
+        """Quickly expand/collapse the task table from the always-visible bar."""
+        if self.task_panel.parentWidget() is self.task_table_dialog:
+            self._show_task_table_dialog()
+            return
+        self.task_panel.setChecked(not self.task_panel.isChecked())
+
     def _show_task_table_dialog(self) -> None:
         if not self.task_panel.isChecked():
             # A collapsed QGroupBox disables its children; expand first so the
@@ -1775,8 +1799,14 @@ class MainWindow(QMainWindow):
             "Ctrl+Z/Y 撤销/重做，Ctrl+回车 确认，Ctrl+Shift+E 快速导出"
         )
         self.shortcut_hint_label.setWordWrap(True)
+        self.task_list_toggle_button = QPushButton("片段列表")
+        self.task_list_toggle_button.setObjectName("secondaryButton")
+        self.task_list_toggle_button.setToolTip(
+            "展开/收起片段任务表格；已分离时弹出表格窗口"
+        )
 
         layout.addWidget(self.cancel_export_button)
+        layout.addWidget(self.task_list_toggle_button)
         layout.addWidget(self.progress_bar, stretch=1)
         layout.addWidget(self.status_label)
         layout.addWidget(self.annotation_stats_label)
@@ -1979,6 +2009,7 @@ class MainWindow(QMainWindow):
         self.needs_fix_selected_button.clicked.connect(lambda: self._set_selected_review_status("needs_fix"))
         self.reject_selected_button.clicked.connect(lambda: self._set_selected_review_status("rejected"))
         self.detach_table_button.clicked.connect(self._show_task_table_dialog)
+        self.task_list_toggle_button.clicked.connect(self._toggle_task_table)
         self.behavior_filter_combo.currentIndexChanged.connect(
             self._apply_table_filters
         )
@@ -3760,6 +3791,7 @@ class MainWindow(QMainWindow):
             self.video_placeholder_item.setText("无法加载视频")
             self.video_placeholder_item.setVisible(True)
         self._resize_video_item()
+        self._sync_video_preview_height(self.video_viewport.size().width())
 
     def _media_error(self, _error: QMediaPlayer.Error, text: str) -> None:
         if text:
