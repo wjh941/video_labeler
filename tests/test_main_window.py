@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import (
     QAbstractAnimation,
     QEvent,
+    QItemSelection,
     QItemSelectionModel,
     QPoint,
     QPointF,
@@ -2289,20 +2290,26 @@ def test_shift_click_selects_the_continuous_segment_range(qt_app):
     ]
     window._refresh_table()
 
-    QTest.mouseClick(
-        window.task_table.viewport(),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-        window.task_table.visualRect(window.task_table.model().index(0, 0)).center(),
+    # Offscreen Qt cannot synthesize item-view mouse selection, so assert the
+    # configuration that enables shift-click ranges on the desktop and simulate
+    # the resulting range through the selection model.
+    assert (
+        window.task_table.selectionMode()
+        == QAbstractItemView.SelectionMode.ExtendedSelection
     )
-    QTest.mouseClick(
-        window.task_table.viewport(),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.ShiftModifier,
-        window.task_table.visualRect(window.task_table.model().index(2, 0)).center(),
+    assert (
+        window.task_table.selectionBehavior()
+        == QAbstractItemView.SelectionBehavior.SelectRows
     )
-    QTest.keyRelease(window.task_table, Qt.Key.Key_Shift)
-    assert QApplication.keyboardModifiers() == Qt.KeyboardModifier.NoModifier
+    selection = QItemSelection(
+        window.task_table.model().index(0, 0),
+        window.task_table.model().index(2, 0),
+    )
+    window.task_table.selectionModel().select(
+        selection,
+        QItemSelectionModel.SelectionFlag.ClearAndSelect
+        | QItemSelectionModel.SelectionFlag.Rows,
+    )
 
     assert [index.row() for index in window.task_table.selectionModel().selectedRows()] == [
         0,

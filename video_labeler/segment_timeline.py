@@ -103,6 +103,26 @@ class SegmentTimelineSlider(QSlider):
             )
             value += interval
 
+    def _draw_playback_progress(self, painter: QPainter, groove) -> None:
+        """Paint the played portion on top so annotation bands never hide it."""
+        progress = self.sliderPosition() if self.isSliderDown() else self.value()
+        progress = min(max(progress, self.minimum()), self.maximum())
+        if self.maximum() <= 0 or progress <= self.minimum():
+            return
+        x = self._position_for_value(progress)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(37, 99, 235, 225))
+        painter.drawRoundedRect(
+            QRectF(
+                groove.x() + 1,
+                groove.center().y() - 2,
+                max(0.0, x - groove.x() - 1),
+                4,
+            ),
+            2,
+            2,
+        )
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         painter = QPainter(self)
@@ -110,6 +130,7 @@ class SegmentTimelineSlider(QSlider):
         self._draw_time_ticks(painter, groove)
         segment = self.segment_range()
         if (segment is None or segment[1] <= segment[0]) and not self._segment_ranges:
+            self._draw_playback_progress(painter, groove)
             return
         painter.setPen(Qt.PenStyle.NoPen)
         # Show existing annotations as quiet context bands; the active range
@@ -132,6 +153,7 @@ class SegmentTimelineSlider(QSlider):
                 painter.drawRoundedRect(
                     QRectF(position - 4, center_y - 7, 8, 14), 4, 4
                 )
+            self._draw_playback_progress(painter, groove)
             painter.setPen(QColor("#e2e8f0"))
             font = QFont(painter.font())
             font.setPointSize(7)
