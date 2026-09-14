@@ -19,6 +19,11 @@ DEFAULT_HOTKEYS = {
     "redo": "Ctrl+Y",
     "save_project": "Ctrl+S",
     "complete_clip": "Return",
+    "reuse_last_clip": "R",
+    "jump_back_1m": "PgUp",
+    "jump_forward_1m": "PgDown",
+    "jump_back_10m": "Shift+PgUp",
+    "jump_forward_10m": "Shift+PgDown",
 }
 
 

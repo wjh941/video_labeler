@@ -1587,6 +1587,12 @@ def test_main_window_shortcut_mapping(qt_app):
         "undo": "Ctrl+Z",
         "redo": "Ctrl+Y",
         "save_project": "Ctrl+S",
+        "complete_clip": "Return",
+        "reuse_last_clip": "R",
+        "jump_back_1m": "PgUp",
+        "jump_forward_1m": "PgDown",
+        "jump_back_10m": "Shift+PgUp",
+        "jump_forward_10m": "Shift+PgDown",
     }
 
     assert set(window.shortcuts) == set(expected)
@@ -1615,6 +1621,12 @@ def test_main_window_shortcut_mapping(qt_app):
         "Ctrl+Z",
         "Ctrl+Y",
         "Ctrl+S",
+        "Return",
+        "R",
+        "PgUp",
+        "PgDown",
+        "Shift+PgUp",
+        "Shift+PgDown",
     ]
 
 

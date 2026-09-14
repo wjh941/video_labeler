@@ -192,6 +192,12 @@ HOTKEY_ACTION_LABELS = {
     "undo": "Undo segment change",
     "redo": "Redo segment change",
     "save_project": "Save project",
+    "complete_clip": "Complete or update current clip",
+    "reuse_last_clip": "Reuse last clip settings",
+    "jump_back_1m": "Jump back 1 minute",
+    "jump_forward_1m": "Jump forward 1 minute",
+    "jump_back_10m": "Jump back 10 minutes",
+    "jump_forward_10m": "Jump forward 10 minutes",
 }
 
 
@@ -497,6 +503,7 @@ class MainWindow(QMainWindow):
         self._utility_shortcuts: list[QShortcut] = []
         self.historical_behavior_tags: tuple[str, ...] = ()
         self._last_annotation_labels: tuple[tuple[str, ...], str, str] = ((), "", "")
+        self._recent_behavior_tags: tuple[str, ...] = ()
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -1159,6 +1166,13 @@ class MainWindow(QMainWindow):
         transport_controls.addWidget(self.set_start_button)
         transport_controls.addWidget(self.set_end_button)
         transport_controls.addWidget(self.quick_add_button)
+        self.reuse_last_button = QPushButton("沿用上一条")
+        self.reuse_last_button.setObjectName("secondaryButton")
+        self.reuse_last_button.setToolTip(
+            "沿用上一片段的行为、极性、光照、人群等标签设置（R）"
+        )
+        self.reuse_last_button.clicked.connect(self.reuse_last_clip_settings)
+        transport_controls.addWidget(self.reuse_last_button)
         transport_controls.addWidget(self.clip_range_label, stretch=1)
         layout.addLayout(transport_controls)
 
@@ -1425,6 +1439,13 @@ class MainWindow(QMainWindow):
         )
         available_tags = self._available_behavior_tags()
         available_set = set(available_tags)
+        recent_tags = tuple(
+            tag for tag in self._recent_behavior_tags if tag in available_set
+        )
+        ordered_tags = (
+            *recent_tags,
+            *(tag for tag in available_tags if tag not in recent_tags),
+        )
         self.historical_behavior_tags = tuple(
             dict.fromkeys(
                 behavior
@@ -1434,8 +1455,8 @@ class MainWindow(QMainWindow):
         )
         self.behavior_checks.clear()
         self.historical_tag_labels.clear()
-        self.behavior_tag_combo.set_tags(available_tags, selected_tags)
-        for behavior in available_tags:
+        self.behavior_tag_combo.set_tags(ordered_tags, selected_tags)
+        for behavior in ordered_tags:
             checkbox = QCheckBox(behavior)
             checkbox.setChecked(behavior in selected_tags)
             color = self.project.custom_behavior_tag_colors.get(behavior)
@@ -2067,6 +2088,11 @@ class MainWindow(QMainWindow):
             "redo": self.redo_segments,
             "save_project": self.save_project,
             "complete_clip": lambda: self.add_or_update_clip(),
+            "reuse_last_clip": self.reuse_last_clip_settings,
+            "jump_back_1m": lambda: self._seek_by(-60_000),
+            "jump_forward_1m": lambda: self._seek_by(60_000),
+            "jump_back_10m": lambda: self._seek_by(-600_000),
+            "jump_forward_10m": lambda: self._seek_by(600_000),
         }
         for shortcut in getattr(self, "shortcuts", {}).values():
             shortcut.setEnabled(False)
@@ -3286,6 +3312,10 @@ class MainWindow(QMainWindow):
             self.project_header.setChecked(False)
         self._mark_project_dirty()
         self._last_annotation_labels = (behaviors, polarity, lighting)
+        if behaviors:
+            self._recent_behavior_tags = tuple(
+                dict.fromkeys((*behaviors, *self._recent_behavior_tags))
+            )[:6]
         self._prepare_next_clip(record.end_seconds)
         if is_new_record:
             self.task_table.scrollToBottom()
@@ -3757,6 +3787,38 @@ class MainWindow(QMainWindow):
             self.timeline_slider.setRange(0, max(0, milliseconds))
         self.duration_label.setText(format_seconds(milliseconds / 1000))
         self._sync_timeline_segment_range()
+
+    def _seek_by(self, milliseconds: int) -> None:
+        """Seek relative to the current position for long-video navigation."""
+        if self.player.mediaStatus() == QMediaPlayer.MediaStatus.NoMedia:
+            return
+        duration = self.player.duration()
+        target = min(max(0, self.player.position() + milliseconds), duration)
+        self.player.setPosition(target)
+
+    def reuse_last_clip_settings(self) -> None:
+        """Copy the label fields of the most recent clip into the editor."""
+        if not self.records:
+            self._set_status("还没有可沿用的片段")
+            return
+        last = self.records[-1]
+        self._rebuild_behavior_controls(last.behaviors)
+        self.polarity_combo.setCurrentText(last.polarity)
+        self.lighting_combo.setCurrentText(last.lighting)
+        for combo, value in (
+            (self.stratum_combo, last.data_stratum),
+            (self.age_combo, last.age),
+            (self.face_familiarity_combo, last.face_familiarity),
+            (self.reid_familiarity_combo, last.reid_familiarity),
+        ):
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        self.person_count_spin.setValue(last.person_count)
+        self._recent_behavior_tags = tuple(
+            dict.fromkeys((*last.behaviors, *self._recent_behavior_tags))
+        )[:6]
+        self._set_status(f"已沿用片段 {last.sequence:03d} 的标签设置")
 
     def _update_play_button(self, state: QMediaPlayer.PlaybackState) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState

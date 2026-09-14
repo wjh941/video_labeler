@@ -112,6 +112,18 @@ class SegmentTimelineSlider(QSlider):
             return f"{hours}:{minutes:02d}:{secs:02d}"
         return f"{minutes}:{secs:02d}.{ms:03d}"
 
+    def mouseMoveEvent(self, event) -> None:
+        groove = self._groove_rect()
+        span = max(1, groove.width())
+        value = QStyle.sliderValueFromPosition(
+            self.minimum(),
+            self.maximum(),
+            int(event.position().x()) - groove.x(),
+            span,
+        )
+        self.setToolTip(self._format_time(value))
+        super().mouseMoveEvent(event)
+
     def mousePressEvent(self, event) -> None:
         segment = self.segment_range()
         if event.button() == Qt.MouseButton.LeftButton and segment is not None:
