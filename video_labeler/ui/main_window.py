@@ -120,6 +120,7 @@ from ..naming import (
     parse_filename,
     validate_output_filename,
 )
+from ..session_io import load_session, save_session
 from ..project_io import (
     LabelProject,
     ProjectVideo,
@@ -136,6 +137,7 @@ from ..project_io import (
     save_project as write_label_project,
     save_tag_preset,
 )
+from ..logging_setup import app_logger
 from ..preannotation_io import PreAnnotation, read_preannotation_json
 from ..preferences_io import (
     DEFAULT_HOTKEYS,
@@ -477,6 +479,10 @@ class MainWindow(QMainWindow):
         self._backup_timer.setSingleShot(True)
         self._backup_timer.setInterval(30_000)
         self._backup_timer.timeout.connect(self._write_automatic_backup)
+        self._session_timer = QTimer(self)
+        self._session_timer.setInterval(15_000)
+        self._session_timer.timeout.connect(self._persist_session)
+        self._session_timer.start()
         self.source_path: Path | None = None
         self.source_name = ""
         self.output_dir: Path | None = None
@@ -504,6 +510,7 @@ class MainWindow(QMainWindow):
         self.historical_behavior_tags: tuple[str, ...] = ()
         self._last_annotation_labels: tuple[tuple[str, ...], str, str] = ((), "", "")
         self._recent_behavior_tags: tuple[str, ...] = ()
+        self._pending_restore_position_ms: int | None = None
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -2200,6 +2207,7 @@ class MainWindow(QMainWindow):
         self._bind_active_video(entry)
         self._mark_project_dirty()
         self._set_status(f"已选择视频：{entry.path.name}")
+        self._persist_session()
 
     def _probe_video_metadata(self, entry: ProjectVideo) -> None:
         if not entry.path.is_file() or entry.metadata:
@@ -2345,6 +2353,58 @@ class MainWindow(QMainWindow):
             self._set_status("已自动备份工程")
         except (OSError, ValueError) as error:
             self._set_status(f"自动备份失败：{self._file_error_tip(error)}")
+
+    def _persist_session(self) -> None:
+        """Snapshot project/video/position so the next run can restore it."""
+        try:
+            save_session(
+                project_path=self._project_path,
+                video_path=self.source_path,
+                position_ms=max(0, int(self.player.position())),
+            )
+        except OSError:
+            pass
+
+    def apply_session_state(self, state: dict) -> bool:
+        """Restore the last session: project, active video and playhead."""
+        restored = False
+        project_path = state.get("project_path")
+        if project_path and Path(project_path).is_file():
+            if self._load_project_path(Path(project_path)):
+                restored = True
+        video_path = state.get("video_path")
+        position_ms = max(0, int(state.get("position_ms") or 0))
+        if video_path:
+            target = Path(video_path)
+            entry = next(
+                (
+                    video
+                    for video in self.project.videos
+                    if video.path == target
+                ),
+                None,
+            )
+            if entry is not None:
+                self.switch_active_video(entry.id)
+                restored = True
+            elif not restored and target.is_file():
+                self.set_source_path(target)
+                restored = True
+        if restored and position_ms > 0:
+            self._pending_restore_position_ms = position_ms
+            if self.player.mediaStatus() in (
+                QMediaPlayer.MediaStatus.LoadedMedia,
+                QMediaPlayer.MediaStatus.BufferedMedia,
+            ):
+                self._apply_pending_restore_position()
+        return restored
+
+    def _apply_pending_restore_position(self) -> None:
+        if not self._pending_restore_position_ms:
+            return
+        self.player.setPosition(self._pending_restore_position_ms)
+        self._pending_restore_position_ms = None
+        self._set_status("已恢复上次播放位置")
 
     def _confirm_discard_dirty_project(self) -> bool:
         if not self._project_dirty:
@@ -3865,6 +3925,11 @@ class MainWindow(QMainWindow):
             self.video_placeholder_item.setVisible(True)
         self._resize_video_item()
         self._sync_video_preview_height(self.video_viewport.size().width())
+        if status in (
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+        ):
+            self._apply_pending_restore_position()
 
     def _media_error(self, _error: QMediaPlayer.Error, text: str) -> None:
         if text:
@@ -4733,6 +4798,7 @@ class MainWindow(QMainWindow):
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
         self._append_log(text)
+        app_logger().info(text)
 
     def _append_log(self, text: str) -> None:
         if text and hasattr(self, "log_panel"):
@@ -4815,6 +4881,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self._confirm_discard_dirty_project():
+            self._persist_session()
+            app_logger().info("应用退出")
             event.accept()
         else:
             event.ignore()
