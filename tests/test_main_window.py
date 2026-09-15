@@ -2949,3 +2949,39 @@ def test_add_clip_action_appears_before_behavior_choices(qt_app):
     ).y()
 
     assert add_clip_y < behaviors_y
+
+
+def test_add_clip_records_annotation_audit_and_edit_preserves_created(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.annotator_edit.setText("zhang")
+    window.behavior_checks["fall"].setChecked(True)
+    window.set_clip_range(1.0, 2.0)
+
+    window.add_or_update_clip()
+    record = window.records[0]
+    assert record.annotator == "zhang"
+    assert record.created_at.endswith("Z")
+    assert record.updated_at.endswith("Z")
+    created = record.created_at
+
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    window.set_clip_range(1.0, 3.0)
+    window.add_or_update_clip()
+
+    updated = window.records[0]
+    assert updated.created_at == created  # 创建时间保持不变
+    assert updated.updated_at >= created
+    assert updated.annotator == "zhang"
+
+
+def test_annotator_field_defaults_to_os_user(qt_app):
+    import os as _os
+
+    window = MainWindow()
+    expected = _os.environ.get("USERNAME") or _os.environ.get("USER") or "unknown"
+    assert window.annotator_edit.text() == expected

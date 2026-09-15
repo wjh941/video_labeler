@@ -86,3 +86,6 @@ class ClipRecord:
     face_familiarity: str = ""
     reid_familiarity: str = ""
     person_count: int = 0
+    annotator: str = ""
+    created_at: str = ""
+    updated_at: str = ""

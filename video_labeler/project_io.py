@@ -585,6 +585,7 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "review_comment", "rejection_reason", "review_history",
         "data_stratum", "events",
         "age", "face_familiarity", "reid_familiarity", "person_count",
+        "annotator", "created_at", "updated_at",
     }
     if (
         not isinstance(document, dict)
@@ -609,6 +610,9 @@ def _validated_record(document: Any) -> dict[str, Any]:
         "age",
         "face_familiarity",
         "reid_familiarity",
+        "annotator",
+        "created_at",
+        "updated_at",
     ):
         history = document.get("review_history", [])
         if not isinstance(history, list) or not all(isinstance(item, dict) for item in history):

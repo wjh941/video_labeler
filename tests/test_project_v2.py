@@ -29,3 +29,46 @@ def test_v1_migration_preserves_segment_data(tmp_path):
     assert migrated["settings"] == {"camera": "a"}
     assert migrated["videos"][0]["segments"][0]["error"] == "x"
     assert "id" in migrated["videos"][0]["segments"][0]
+
+
+def test_v2_round_trip_preserves_annotation_audit(tmp_path):
+    source = tmp_path / "camera.mp4"
+    source.write_bytes(b"x")
+    project = new_project()
+    video = add_or_activate_video(project, source)
+    video.segments.append(
+        ClipRecord(
+            "camera.mp4", 1, 2, "clip.mp4", ("dog_out",), "pos", "daytime",
+            1, "queued", "", "n", annotator="zhang",
+            created_at="2026-02-01T08:00:00Z",
+            updated_at="2026-02-01T09:00:00Z",
+        )
+    )
+    target = tmp_path / "work.labelproj"
+    save_project_v2(target, project, now="2026-01-01T00:00:00Z")
+    segment = load_project_v2(target).videos[0].segments[0]
+    assert segment.annotator == "zhang"
+    assert segment.created_at == "2026-02-01T08:00:00Z"
+    assert segment.updated_at == "2026-02-01T09:00:00Z"
+
+
+def test_v2_without_audit_fields_loads_with_defaults(tmp_path):
+    source = tmp_path / "camera.mp4"
+    source.write_bytes(b"x")
+    project = new_project()
+    video = add_or_activate_video(project, source)
+    video.segments.append(
+        ClipRecord("camera.mp4", 1, 2, "clip.mp4", ("dog_out",))
+    )
+    target = tmp_path / "work.labelproj"
+    save_project_v2(target, project, now="2026-01-01T00:00:00Z")
+    import json
+    document = json.loads(target.read_text(encoding="utf-8"))
+    for segment in document["videos"][0]["segments"]:
+        for key in ("annotator", "created_at", "updated_at"):
+            segment.pop(key, None)
+    target.write_text(json.dumps(document), encoding="utf-8")
+    segment = load_project_v2(target).videos[0].segments[0]
+    assert segment.annotator == ""
+    assert segment.created_at == ""
+    assert segment.updated_at == ""

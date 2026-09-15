@@ -1,5 +1,6 @@
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -862,6 +863,12 @@ class MainWindow(QMainWindow):
         metadata_layout.addWidget(self.camera_edit)
         metadata_layout.addWidget(QLabel("视角"))
         metadata_layout.addWidget(self.view_combo)
+        self.annotator_edit = QLineEdit(self._default_annotator())
+        self.annotator_edit.setPlaceholderText("标注人")
+        self.annotator_edit.setToolTip("记录到每条片段与导出 CSV 的标注人姓名")
+        self.annotator_edit.textChanged.connect(self._mark_project_dirty)
+        metadata_layout.addWidget(QLabel("标注人"))
+        metadata_layout.addWidget(self.annotator_edit)
         metadata_layout.addStretch(1)
         layout.addLayout(metadata_layout)
 
@@ -2382,6 +2389,7 @@ class MainWindow(QMainWindow):
         settings["date"] = self.date_edit.text().strip()
         settings["camera"] = self.camera_edit.text().strip()
         settings["view"] = self.view_combo.currentText()
+        settings["annotator"] = self.annotator_edit.text().strip()
         settings["output_dir"] = str(self.output_dir) if self.output_dir else ""
         return self.project
 
@@ -2404,6 +2412,14 @@ class MainWindow(QMainWindow):
             self._set_status("已自动备份工程")
         except (OSError, ValueError) as error:
             self._set_status(f"自动备份失败：{self._file_error_tip(error)}")
+
+    @staticmethod
+    def _default_annotator() -> str:
+        return (
+            os.environ.get("USERNAME")
+            or os.environ.get("USER")
+            or "unknown"
+        )
 
     def _persist_session(self) -> None:
         """Snapshot project/video/position so the next run can restore it."""
@@ -2643,6 +2659,9 @@ class MainWindow(QMainWindow):
         settings = project.global_settings
         self.date_edit.setText(settings.get("date", self.date_edit.text()))
         self.camera_edit.setText(settings.get("camera", self.camera_edit.text()))
+        self.annotator_edit.setText(
+            settings.get("annotator") or self._default_annotator()
+        )
         if settings.get("view"):
             self._set_custom_combo_value(
                 self.view_combo,
@@ -3440,6 +3459,21 @@ class MainWindow(QMainWindow):
         )
         before = list(self.records)
         is_new_record = self._editing_index is None
+        now_stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        previous = (
+            self.records[self._editing_index]
+            if not is_new_record
+            else None
+        )
+        record.annotator = (
+            (previous.annotator if previous is not None else "")
+            or self.annotator_edit.text().strip()
+            or self._default_annotator()
+        )
+        record.created_at = (
+            (previous.created_at if previous is not None else "") or now_stamp
+        )
+        record.updated_at = now_stamp
         if is_new_record:
             self.records.append(record)
             self._set_status(f"已添加片段 {sequence:03d}")
@@ -3706,6 +3740,12 @@ class MainWindow(QMainWindow):
             record.reviewed_at = reviewed_at if review_status != "pending" else ""
             record.review_comment = ""
             record.rejection_reason = rejection_reason
+            record.updated_at = reviewed_at
+            if not record.annotator:
+                record.annotator = (
+                    self.annotator_edit.text().strip()
+                    or self._default_annotator()
+                )
             record.review_history.append({
                 "status": review_status,
                 "reviewer": record.reviewer,
@@ -4254,6 +4294,12 @@ class MainWindow(QMainWindow):
             record.reviewed_at = reviewed_at if review_status != "pending" else ""
             record.review_comment = review_comment if review_status != "pending" else ""
             record.rejection_reason = rejection_reason
+            record.updated_at = reviewed_at
+            if not record.annotator:
+                record.annotator = (
+                    self.annotator_edit.text().strip()
+                    or self._default_annotator()
+                )
             record.review_history.append({
                 "status": review_status,
                 "reviewer": record.reviewer,
@@ -4349,7 +4395,14 @@ class MainWindow(QMainWindow):
                 raise ValueError(f"批量修改后输出文件名重复：{record.output}")
             proposed_outputs.add(output)
 
+        batch_stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         for index, record in proposed.items():
+            record.updated_at = batch_stamp
+            if not record.annotator:
+                record.annotator = (
+                    self.annotator_edit.text().strip()
+                    or self._default_annotator()
+                )
             self.records[index] = record
         self._editing_index = None
         self._refresh_table()

@@ -78,6 +78,9 @@ def project_to_v2_dict(
             item["review_comment"] = getattr(source_video.segments[index], "review_comment", "")
             item["rejection_reason"] = getattr(source_video.segments[index], "rejection_reason", "")
             item["review_history"] = list(getattr(source_video.segments[index], "review_history", []))
+            item["annotator"] = getattr(source_video.segments[index], "annotator", "")
+            item["created_at"] = getattr(source_video.segments[index], "created_at", "")
+            item["updated_at"] = getattr(source_video.segments[index], "updated_at", "")
             segments.append(item)
         videos.append({
             "id": video["id"],
@@ -174,6 +177,9 @@ def project_from_v2_dict(document: Any, project_path: Path) -> LabelProject:
             target_segment.review_comment = source_segment.get("review_comment", "")
             target_segment.rejection_reason = source_segment.get("rejection_reason", "")
             target_segment.review_history = [dict(item) for item in source_segment.get("review_history", [])]
+            target_segment.annotator = source_segment.get("annotator", "")
+            target_segment.created_at = source_segment.get("created_at", "")
+            target_segment.updated_at = source_segment.get("updated_at", "")
     return result
 
 

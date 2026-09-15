@@ -15,8 +15,11 @@ FULL_CSV_FIELDS = (
     "polarity", "lighting", "sequence", "status", "error", "note",
     "review_status", "reviewer", "reviewed_at", "review_comment", "rejection_reason",
     "data_stratum", "events",
-    "age", "face_familiarity", "reid_familiarity", "person_count"
+    "age", "face_familiarity", "reid_familiarity", "person_count",
+    "annotator", "created_at", "updated_at",
 )
+# Audit columns appended later; older CSVs without them stay importable.
+FULL_CSV_AUDIT_FIELDS = ("annotator", "created_at", "updated_at")
 
 
 def _parse_seconds(value: str) -> float:
@@ -128,6 +131,9 @@ def write_full_clip_csv(path: Path, records: Sequence[ClipRecord]) -> None:
                 "face_familiarity": record.face_familiarity,
                 "reid_familiarity": record.reid_familiarity,
                 "person_count": record.person_count,
+                "annotator": record.annotator,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
             })
 
 
@@ -136,7 +142,9 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
     import json
     with path.open("r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
-        if set(FULL_CSV_FIELDS) - set(reader.fieldnames or ()):
+        missing = set(FULL_CSV_FIELDS) - set(reader.fieldnames or ())
+        unsupported_missing = missing - set(FULL_CSV_AUDIT_FIELDS)
+        if unsupported_missing:
             raise ValueError("full CSV missing columns")
         records = []
         for index, row in enumerate(reader, start=2):
@@ -170,6 +178,9 @@ def read_full_clip_csv(path: Path) -> list[ClipRecord]:
                 face_familiarity=row.get("face_familiarity", ""),
                 reid_familiarity=row.get("reid_familiarity", ""),
                 person_count=int(row.get("person_count", 0) or 0),
+                annotator=row.get("annotator", ""),
+                created_at=row.get("created_at", ""),
+                updated_at=row.get("updated_at", ""),
             ))
     return records
 
