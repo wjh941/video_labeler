@@ -2951,14 +2951,19 @@ def test_add_clip_action_appears_before_behavior_choices(qt_app):
     assert add_clip_y < behaviors_y
 
 
-def test_number_keys_follow_recent_used_order(qt_app):
+def test_number_keys_follow_stable_pinned_order(qt_app):
     window = MainWindow()
-    window._recent_behavior_tags = ("fall", "dog_out")
+    window._pinned_behavior_tags = ("fall", "dog_out")
+    window._rebuild_behavior_controls()  # 让弹层角标反映钉选顺序
 
     window._dispatch_number_key(1)
     assert "fall" in window.selected_behaviors()
     window._dispatch_number_key(2)
     assert "dog_out" in window.selected_behaviors()
+
+    # 勾选变化不改变映射位置（顺序稳定，不随使用漂移）
+    window.behavior_checks["fall"].setChecked(False)
+    assert window.behavior_tag_combo.model().item(0).text().startswith("1 fall")
 
 
 def test_behavior_popup_shows_number_hints(qt_app):
@@ -2968,13 +2973,16 @@ def test_behavior_popup_shows_number_hints(qt_app):
     assert model.item(0).toolTip()
 
 
-def test_pin_tag_moves_it_to_front(qt_app):
+def test_pin_and_unpin_tags(qt_app):
     window = MainWindow()
-    window._recent_behavior_tags = ("fall", "dog_out")
+    window._pinned_behavior_tags = ("fall",)
 
     window._pin_behavior_tag("dog_out")
-    assert window._recent_behavior_tags[0] == "dog_out"
+    assert window._pinned_behavior_tags == ("dog_out", "fall")
     assert window.behavior_tag_combo.model().item(0).text().startswith("1 dog_out")
+
+    window._pin_behavior_tag("dog_out")
+    assert window._pinned_behavior_tags == ("fall",)
 
 
 def test_continuous_mode_inherits_labels_and_advances(qt_app, tmp_path):

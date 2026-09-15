@@ -349,6 +349,11 @@ class BehaviorTagComboBox(QComboBox):
         view.customContextMenuRequested.connect(self._show_pin_menu)
         view.pressed.connect(self._toggle_index)
 
+        self._pinned: tuple[str, ...] = ()
+
+    def set_pinned_tags(self, pinned: tuple) -> None:
+        self._pinned = tuple(pinned)
+
     def _show_pin_menu(self, pos) -> None:
         index = self.view().indexAt(pos)
         if not index.isValid():
@@ -357,7 +362,12 @@ class BehaviorTagComboBox(QComboBox):
         if not tag:
             return
         menu = QMenu(self)
-        pin_action = menu.addAction("设为常用第一项")
+        label = (
+            f"取消常用（{tag}）"
+            if tag in self._pinned
+            else f"设为常用第一项（{tag}）"
+        )
+        pin_action = menu.addAction(label)
         if menu.exec(self.view().viewport().mapToGlobal(pos)) is pin_action:
             self.tagPinned.emit(tag)
 
@@ -553,6 +563,7 @@ class MainWindow(QMainWindow):
         self._pending_restore_position_ms: int | None = None
         self._autosave_enabled = bool(load_session().get("autosave"))
         self._continuous_mode = False
+        self._pinned_behavior_tags: tuple[str, ...] = ()
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -1272,7 +1283,7 @@ class MainWindow(QMainWindow):
         self.continuous_mode_button = QPushButton("连标：关")
         self.continuous_mode_button.setCheckable(True)
         self.continuous_mode_button.setToolTip(
-            "连续标注模式：完成片段自动沿用上一片段全部标签，并跳到新起点继续播放（Ctrl+L）"
+            "连续标注模式：完成片段自动沿用上一片段全部标签，并跳到新起点（按空格继续播放；Ctrl+L 切换）"
         )
         self.add_button.setObjectName("addClipButton")
         self.remove_button.setObjectName("dangerButton")
@@ -1513,15 +1524,15 @@ class MainWindow(QMainWindow):
         return (*BEHAVIOR_LABELS, *self.project.custom_behavior_tags)
 
     def _ordered_behavior_tags(self) -> tuple[str, ...]:
-        """Behavior tags with the most recently used ones first."""
+        """Pinned tags first (stable positions), then library order."""
         available = self._available_behavior_tags()
-        available_set = set(available)
-        recent = tuple(
-            tag for tag in self._recent_behavior_tags if tag in available_set
+        pinned = tuple(
+            tag for tag in self._pinned_behavior_tags if tag in set(available)
         )
+        pinned_set = set(pinned)
         return (
-            *recent,
-            *(tag for tag in available if tag not in recent),
+            *pinned,
+            *(tag for tag in available if tag not in pinned_set),
         )
 
     def _rebuild_behavior_controls(
@@ -1544,6 +1555,7 @@ class MainWindow(QMainWindow):
         self.behavior_checks.clear()
         self.historical_tag_labels.clear()
         self.behavior_tag_combo.set_tags(ordered_tags, selected_tags)
+        self.behavior_tag_combo.set_pinned_tags(self._pinned_behavior_tags)
         self._update_behavior_hotkey_hint(ordered_tags)
         for behavior in ordered_tags:
             checkbox = QCheckBox(behavior)
@@ -1593,10 +1605,23 @@ class MainWindow(QMainWindow):
     def _pin_behavior_tag(self, tag: str) -> None:
         if tag not in self._available_behavior_tags():
             return
-        rest = tuple(item for item in self._recent_behavior_tags if item != tag)
-        self._recent_behavior_tags = (tag, *rest)[:6]
+        if tag in self._pinned_behavior_tags:
+            self._pinned_behavior_tags = tuple(
+                item for item in self._pinned_behavior_tags if item != tag
+            )
+            status = f"已取消常用：{tag}"
+        else:
+            self._pinned_behavior_tags = (
+                tag,
+                *(
+                    item
+                    for item in self._pinned_behavior_tags
+                    if item != tag
+                ),
+            )
+            status = f"已将 {tag} 置为常用第一项"
         self._rebuild_behavior_controls(self.selected_behaviors())
-        self._set_status(f"已将 {tag} 置为常用第一项")
+        self._set_status(status)
 
     def _sync_custom_tag_library(self) -> None:
         selected_tag = self.custom_tag_library_combo.currentData()
@@ -2501,7 +2526,7 @@ class MainWindow(QMainWindow):
         self._continuous_mode = checked
         self.continuous_mode_button.setText("连标：开" if checked else "连标：关")
         self._set_status(
-            "连续标注模式已开启：自动沿用标签并续播"
+            "连续标注模式已开启：自动沿用标签并跳到新起点"
             if checked
             else "连续标注模式已关闭"
         )
@@ -3737,11 +3762,6 @@ class MainWindow(QMainWindow):
         if self._continuous_mode and self.records:
             last = self.records[-1]
             self.player.setPosition(int(last.end_seconds * 1000))
-            if (
-                self.player.playbackState()
-                != QMediaPlayer.PlaybackState.PlayingState
-            ):
-                self.player.play()
 
     def confirm_and_next_pending(self) -> None:
         """Save the current clip, then jump to the next pending review task."""
