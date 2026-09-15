@@ -12,6 +12,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     Property,
     QSignalBlocker,
+    QSize,
     QSizeF,
     Signal,
     QTimer,
@@ -44,8 +45,10 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGraphicsDropShadowEffect,
+    QListView,
     QGraphicsScene,
     QGraphicsView,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -318,6 +321,9 @@ class BehaviorTagComboBox(QComboBox):
     """A compact, checkable tag picker that retains multi-tag selection."""
 
     selectionChanged = Signal()
+    COLUMNS = 3
+    CELL_WIDTH = 150
+    CELL_HEIGHT = 26
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -330,8 +336,17 @@ class BehaviorTagComboBox(QComboBox):
         model = QStandardItemModel(self)
         model.dataChanged.connect(self._on_model_data_changed)
         self.setModel(model)
-        self.view().setMinimumWidth(240)
-        self.view().pressed.connect(self._toggle_index)
+        view = self.view()
+        view.setMinimumWidth(self.COLUMNS * self.CELL_WIDTH + 16)
+        view.setFlow(QListView.Flow.LeftToRight)
+        view.setWrapping(True)
+        view.setResizeMode(QListView.ResizeMode.Adjust)
+        view.setGridSize(QSize(self.CELL_WIDTH, self.CELL_HEIGHT))
+        view.pressed.connect(self._toggle_index)
+
+    def popup_visible_rows(self, count: int | None = None) -> int:
+        total = self.count() if count is None else count
+        return max(1, (total + self.COLUMNS - 1) // self.COLUMNS)
 
     def set_tags(
         self,
@@ -354,7 +369,9 @@ class BehaviorTagComboBox(QComboBox):
                 else Qt.CheckState.Unchecked
             )
             model.appendRow(item)
-        self.setMaxVisibleItems(max(1, model.rowCount()))
+        rows = self.popup_visible_rows(model.rowCount())
+        self.setMaxVisibleItems(rows)
+        self.view().setMinimumHeight(rows * self.CELL_HEIGHT + 8)
         self.setCurrentIndex(-1)
         self._update_summary()
 
@@ -1361,6 +1378,7 @@ class MainWindow(QMainWindow):
         self.stratum_combo.addItem("不设置", "")
         for value in STRATUM_VALUES:
             self.stratum_combo.addItem(STRATUM_LABELS.get(value, value), value)
+        self.stratum_combo.view().setMinimumWidth(210)
 
         self.scene_group = CollapsibleGroupBox("场景属性")
         self.scene_group.setChecked(False)
@@ -1399,17 +1417,22 @@ class MainWindow(QMainWindow):
         self.person_group = CollapsibleGroupBox("人员身份")
         self.person_group.setChecked(False)
         person_content = QWidget()
-        person_form = QFormLayout(person_content)
+        person_grid = QGridLayout(person_content)
+        person_grid.setContentsMargins(0, 0, 0, 0)
+        person_grid.setHorizontalSpacing(10)
+        person_grid.setVerticalSpacing(6)
         self.age_combo = QComboBox()
         self.age_combo.addItem("不设置", "")
         for value in AGE_VALUES:
             self.age_combo.addItem(AGE_LABELS.get(value, value), value)
+        self.age_combo.view().setMinimumWidth(160)
         self.face_familiarity_combo = QComboBox()
         self.face_familiarity_combo.addItem("不设置", "")
         for value in FAMILIARITY_VALUES:
             self.face_familiarity_combo.addItem(
                 FAMILIARITY_LABELS.get(value, value), value
             )
+        self.face_familiarity_combo.view().setMinimumWidth(180)
         self.reid_familiarity_combo = QComboBox()
         self.reid_familiarity_combo.addItem("不设置", "")
         for value in FAMILIARITY_VALUES:
@@ -1420,10 +1443,16 @@ class MainWindow(QMainWindow):
         self.person_count_spin.setRange(0, 99)
         self.person_count_spin.setValue(0)
         self.person_count_spin.setSpecialValueText("不设置")
-        person_form.addRow("年龄", self.age_combo)
-        person_form.addRow("人脸熟悉度", self.face_familiarity_combo)
-        person_form.addRow("体态 ReID", self.reid_familiarity_combo)
-        person_form.addRow("人数", self.person_count_spin)
+        person_grid.addWidget(QLabel("年龄"), 0, 0)
+        person_grid.addWidget(self.age_combo, 0, 1)
+        person_grid.addWidget(QLabel("人脸熟悉度"), 0, 2)
+        person_grid.addWidget(self.face_familiarity_combo, 0, 3)
+        person_grid.addWidget(QLabel("体态 ReID"), 1, 0)
+        person_grid.addWidget(self.reid_familiarity_combo, 1, 1)
+        person_grid.addWidget(QLabel("人数"), 1, 2)
+        person_grid.addWidget(self.person_count_spin, 1, 3)
+        person_grid.setColumnStretch(1, 1)
+        person_grid.setColumnStretch(3, 1)
         person_layout = QVBoxLayout(self.person_group)
         person_layout.setContentsMargins(6, 6, 6, 6)
         person_layout.addWidget(person_content)

@@ -1074,7 +1074,11 @@ def test_behavior_selector_is_compact_and_shows_all_popup_options(qt_app):
 
     assert not window.behaviors_group.findChildren(QScrollArea)
     assert window.behavior_tag_combo.maxVisibleItems() == (
-        window.behavior_tag_combo.count()
+        window.behavior_tag_combo.popup_visible_rows()
+    )
+    assert window.behavior_tag_combo.view().isWrapping() is True
+    assert window.behavior_tag_combo.view().gridSize().width() == (
+        window.behavior_tag_combo.CELL_WIDTH
     )
     assert not window.behavior_tag_combo.view().isVisible()
     assert not hasattr(window, "behavior_checks_layout")
@@ -2514,7 +2518,8 @@ def test_page_scroll_keeps_video_and_annotation_in_top_workspace(
     assert window.main_content_scroll.horizontalScrollBar().maximum() == 0
     assert window.main_content_scroll.widget() is window.workspace_content
     layout = window.workspace_row.layout()
-    assert layout.itemAt(0).widget() is window.video_panel
+    assert layout.itemAt(0).widget() is window.media_column
+    assert window.media_column.layout().itemAt(0).widget() is window.video_panel
     assert layout.itemAt(1).widget() is window.annotation_workspace
     assert window.workspace_row.contentsRect().contains(
         window.video_panel.geometry()
