@@ -77,6 +77,42 @@ def test_main_window_persists_session_on_source_selection(
         window.deleteLater()
 
 
+def test_autosave_tick_saves_dirty_project(qt_app, isolated_appdata, tmp_path):
+    project_file = tmp_path / "demo.labelproj"
+    window = MainWindow()
+    try:
+        window._project_path = project_file
+        window._project_dirty = True
+        window.autosave_toggle_button.setChecked(True)
+        window._autosave_tick()
+        assert project_file.is_file()
+        assert window._project_dirty is False
+    finally:
+        window.deleteLater()
+
+
+def test_autosave_tick_skips_without_project_path(qt_app, isolated_appdata):
+    window = MainWindow()
+    try:
+        window._autosave_enabled = True
+        window._project_dirty = True
+        window._autosave_tick()
+        assert window._project_dirty is True  # untouched, no dialog
+    finally:
+        window.deleteLater()
+
+
+def test_autosave_toggle_persists_preference(qt_app, isolated_appdata):
+    window = MainWindow()
+    try:
+        assert window.autosave_toggle_button.text() == "自动保存 关"
+        window.autosave_toggle_button.setChecked(True)
+        assert window.autosave_toggle_button.text() == "自动保存 开"
+        assert session_io.load_session()["autosave"] is True
+    finally:
+        window.deleteLater()
+
+
 def test_apply_session_state_restores_video_without_project(
     qt_app, isolated_appdata
 ):

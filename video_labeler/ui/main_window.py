@@ -500,6 +500,10 @@ class MainWindow(QMainWindow):
         self._session_timer.setInterval(15_000)
         self._session_timer.timeout.connect(self._persist_session)
         self._session_timer.start()
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(30_000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        self._autosave_timer.start()
         self.source_path: Path | None = None
         self.source_name = ""
         self.output_dir: Path | None = None
@@ -528,6 +532,7 @@ class MainWindow(QMainWindow):
         self._last_annotation_labels: tuple[tuple[str, ...], str, str] = ((), "", "")
         self._recent_behavior_tags: tuple[str, ...] = ()
         self._pending_restore_position_ms: int | None = None
+        self._autosave_enabled = bool(load_session().get("autosave"))
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -1867,14 +1872,31 @@ class MainWindow(QMainWindow):
             "Ctrl+Z/Y 撤销/重做，Ctrl+回车 确认，Ctrl+Shift+E 快速导出"
         )
         self.shortcut_hint_label.setWordWrap(True)
+        # The hint must not force the status row wider than small windows.
+        self.shortcut_hint_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.shortcut_hint_label.setToolTip(self.shortcut_hint_label.text())
         self.task_list_toggle_button = QPushButton("片段列表")
         self.task_list_toggle_button.setObjectName("secondaryButton")
         self.task_list_toggle_button.setToolTip(
             "展开/收起片段任务表格；已分离时弹出表格窗口"
         )
+        self.autosave_toggle_button = QPushButton(
+            "自动保存 开" if self._autosave_enabled else "自动保存 关"
+        )
+        self.autosave_toggle_button.setObjectName("secondaryButton")
+        self.autosave_toggle_button.setCheckable(True)
+        self.autosave_toggle_button.setChecked(self._autosave_enabled)
+        self.autosave_toggle_button.setToolTip(
+            "开启后每30秒自动保存当前工程（需先保存过一次工程文件）"
+        )
+        self.autosave_toggle_button.toggled.connect(self._toggle_autosave)
 
         layout.addWidget(self.cancel_export_button)
         layout.addWidget(self.task_list_toggle_button)
+        layout.addWidget(self.autosave_toggle_button)
         layout.addWidget(self.progress_bar, stretch=1)
         layout.addWidget(self.status_label)
         layout.addWidget(self.annotation_stats_label)
@@ -2390,9 +2412,30 @@ class MainWindow(QMainWindow):
                 project_path=self._project_path,
                 video_path=self.source_path,
                 position_ms=max(0, int(self.player.position())),
+                autosave=self._autosave_enabled,
             )
         except OSError:
             pass
+
+    def _autosave_tick(self) -> None:
+        """Silently save the open project; must never open dialogs."""
+        if not self._autosave_enabled or self._project_path is None:
+            return
+        if not self._project_dirty:
+            return
+        self.save_project()
+
+    def _toggle_autosave(self, checked: bool) -> None:
+        self._autosave_enabled = checked
+        self.autosave_toggle_button.setText(
+            "自动保存 开" if checked else "自动保存 关"
+        )
+        self._set_status(
+            "工程自动保存已开启（每30秒）"
+            if checked
+            else "工程自动保存已关闭"
+        )
+        self._persist_session()
 
     def apply_session_state(self, state: dict) -> bool:
         """Restore the last session: project, active video and playhead."""

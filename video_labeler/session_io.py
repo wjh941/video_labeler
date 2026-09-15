@@ -25,12 +25,14 @@ def save_session(
     project_path: Path | str | None,
     video_path: Path | str | None,
     position_ms: int,
+    autosave: bool = False,
 ) -> None:
     document = {
         "version": SESSION_VERSION,
         "project_path": str(project_path) if project_path else None,
         "video_path": str(video_path) if video_path else None,
         "position_ms": max(0, int(position_ms or 0)),
+        "autosave": bool(autosave),
     }
     target = session_path()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,7 @@ def load_session() -> dict:
         "project_path": document.get("project_path") or None,
         "video_path": document.get("video_path") or None,
         "position_ms": max(0, int(document.get("position_ms") or 0)),
+        "autosave": bool(document.get("autosave", False)),
     }
 
 
