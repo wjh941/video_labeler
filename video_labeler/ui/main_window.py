@@ -1333,6 +1333,11 @@ class MainWindow(QMainWindow):
         behavior_content_layout.setSpacing(8)
         self.behavior_tag_combo = BehaviorTagComboBox()
         behavior_content_layout.addWidget(self.behavior_tag_combo)
+        self.behavior_chip_row = QWidget()
+        self.behavior_chip_layout = QHBoxLayout(self.behavior_chip_row)
+        self.behavior_chip_layout.setContentsMargins(0, 0, 0, 0)
+        self.behavior_chip_layout.setSpacing(4)
+        behavior_content_layout.addWidget(self.behavior_chip_row)
         self.behavior_hotkey_hint = QLabel("")
         self.behavior_hotkey_hint.setObjectName("mutedLabel")
         behavior_content_layout.addWidget(self.behavior_hotkey_hint)
@@ -1556,6 +1561,7 @@ class MainWindow(QMainWindow):
         self.historical_tag_labels.clear()
         self.behavior_tag_combo.set_tags(ordered_tags, selected_tags)
         self.behavior_tag_combo.set_pinned_tags(self._pinned_behavior_tags)
+        self._rebuild_behavior_chips(ordered_tags)
         self._update_behavior_hotkey_hint(ordered_tags)
         for behavior in ordered_tags:
             checkbox = QCheckBox(behavior)
@@ -1593,13 +1599,49 @@ class MainWindow(QMainWindow):
         if hasattr(self, "behavior_filter_combo"):
             self._sync_filter_options()
 
+    def _rebuild_behavior_chips(self, ordered_tags) -> None:
+        """常驻常用标签按钮：角标即数字键，点击直接勾选，无需打开弹层。"""
+        while self.behavior_chip_layout.count():
+            item = self.behavior_chip_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        for index, tag in enumerate(ordered_tags[:6]):
+            chip = QPushButton(f"{index + 1} {tag}")
+            chip.setObjectName("behaviorChip")
+            chip.setCheckable(True)
+            chip.setChecked(tag in self.selected_behaviors())
+            chip.setToolTip(tag)
+            chip.setMinimumHeight(24)
+            chip.setMinimumWidth(0)
+            chip.setSizePolicy(
+                QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+            )
+            chip.clicked.connect(
+                lambda checked=False, t=tag: self._toggle_behavior_shortcut(t)
+            )
+            self.behavior_chip_layout.addWidget(chip)
+
+    def _sync_behavior_chips(self) -> None:
+        if not hasattr(self, "behavior_chip_layout"):
+            return
+        selected = set(self.selected_behaviors())
+        for index in range(self.behavior_chip_layout.count()):
+            widget = self.behavior_chip_layout.itemAt(index).widget()
+            if widget is None:
+                continue
+            tag = str(widget.toolTip() or "")
+            widget.blockSignals(True)
+            widget.setChecked(tag in selected)
+            widget.blockSignals(False)
+
     def _update_behavior_hotkey_hint(self, ordered_tags) -> None:
         pairs = [
             f"{index + 1} {tag}"
-            for index, tag in enumerate(ordered_tags[:9])
+            for index, tag in enumerate(ordered_tags[6:9], start=6)
         ]
         self.behavior_hotkey_hint.setText(
-            "数字键直选：" + "　".join(pairs) if pairs else ""
+            "数字键：" + "　".join(pairs) if pairs else ""
         )
 
     def _pin_behavior_tag(self, tag: str) -> None:
@@ -1648,6 +1690,7 @@ class MainWindow(QMainWindow):
         for behavior, checkbox in self.behavior_checks.items():
             with QSignalBlocker(checkbox):
                 checkbox.setChecked(behavior in selected)
+        self._sync_behavior_chips()
         self._update_filename_preview()
 
     def _update_label_group_titles(self) -> None:

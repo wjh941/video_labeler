@@ -2973,6 +2973,27 @@ def test_behavior_popup_shows_number_hints(qt_app):
     assert model.item(0).toolTip()
 
 
+def test_behavior_chips_are_always_visible_and_clickable(qt_app):
+    window = MainWindow()
+    window._pinned_behavior_tags = ("fall", "dog_out")
+    window._rebuild_behavior_controls()
+    qt_app.processEvents()
+
+    layout = window.behavior_chip_layout
+    assert layout.count() >= 6  # 常驻按钮排无需打开弹层
+    first = layout.itemAt(0).widget()
+    assert first.text().startswith("1 ")
+    assert first.objectName() == "behaviorChip"
+
+    first.click()  # 点击 = 勾选，等价按数字键
+    assert "fall" in window.selected_behaviors()
+    assert first.isChecked()
+
+    first.click()
+    assert "fall" not in window.selected_behaviors()
+    assert not first.isChecked()
+
+
 def test_pin_and_unpin_tags(qt_app):
     window = MainWindow()
     window._pinned_behavior_tags = ("fall",)
