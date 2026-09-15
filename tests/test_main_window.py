@@ -2951,6 +2951,53 @@ def test_add_clip_action_appears_before_behavior_choices(qt_app):
     assert add_clip_y < behaviors_y
 
 
+def test_number_keys_follow_recent_used_order(qt_app):
+    window = MainWindow()
+    window._recent_behavior_tags = ("fall", "dog_out")
+
+    window._dispatch_number_key(1)
+    assert "fall" in window.selected_behaviors()
+    window._dispatch_number_key(2)
+    assert "dog_out" in window.selected_behaviors()
+
+
+def test_behavior_popup_shows_number_hints(qt_app):
+    window = MainWindow()
+    model = window.behavior_tag_combo.model()
+    assert model.item(0).text().startswith("1 ")
+    assert model.item(0).toolTip()
+
+
+def test_pin_tag_moves_it_to_front(qt_app):
+    window = MainWindow()
+    window._recent_behavior_tags = ("fall", "dog_out")
+
+    window._pin_behavior_tag("dog_out")
+    assert window._recent_behavior_tags[0] == "dog_out"
+    assert window.behavior_tag_combo.model().item(0).text().startswith("1 dog_out")
+
+
+def test_continuous_mode_inherits_labels_and_advances(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "source.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.continuous_mode_button.setChecked(True)
+    window.behavior_checks["fall"].setChecked(True)
+    window.polarity_combo.setCurrentText("neg")
+    window.set_clip_range(1.0, 2.0)
+
+    window.add_or_update_clip()
+    window.set_clip_range(2.0, 3.0)
+    window.add_or_update_clip()
+
+    assert window.records[0].behaviors == ("fall",)
+    assert window.records[1].behaviors == ("fall",)
+    assert window.records[1].polarity == "neg"
+    assert window.start_spin.value() == 3.0
+
+
 def test_add_clip_records_annotation_audit_and_edit_preserves_created(qt_app, tmp_path):
     window = MainWindow()
     window.set_source_path(tmp_path / "source.mp4")

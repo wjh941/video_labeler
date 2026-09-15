@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
     QListView,
+    QMenu,
     QGraphicsScene,
     QGraphicsView,
     QGridLayout,
@@ -322,6 +323,7 @@ class BehaviorTagComboBox(QComboBox):
     """A compact, checkable tag picker that retains multi-tag selection."""
 
     selectionChanged = Signal()
+    tagPinned = Signal(str)
     COLUMNS = 3
     CELL_WIDTH = 150
     CELL_HEIGHT = 26
@@ -343,7 +345,21 @@ class BehaviorTagComboBox(QComboBox):
         view.setWrapping(True)
         view.setResizeMode(QListView.ResizeMode.Adjust)
         view.setGridSize(QSize(self.CELL_WIDTH, self.CELL_HEIGHT))
+        view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        view.customContextMenuRequested.connect(self._show_pin_menu)
         view.pressed.connect(self._toggle_index)
+
+    def _show_pin_menu(self, pos) -> None:
+        index = self.view().indexAt(pos)
+        if not index.isValid():
+            return
+        tag = str(index.data(Qt.ItemDataRole.UserRole) or "")
+        if not tag:
+            return
+        menu = QMenu(self)
+        pin_action = menu.addAction("设为常用第一项")
+        if menu.exec(self.view().viewport().mapToGlobal(pos)) is pin_action:
+            self.tagPinned.emit(tag)
 
     def popup_visible_rows(self, count: int | None = None) -> int:
         total = self.count() if count is None else count
@@ -358,8 +374,10 @@ class BehaviorTagComboBox(QComboBox):
         model = self.model()
         assert isinstance(model, QStandardItemModel)
         model.clear()
-        for tag in tags:
-            item = QStandardItem(tag)
+        for position, tag in enumerate(tags):
+            label = f"{position + 1} {tag}" if position < 9 else tag
+            item = QStandardItem(label)
+            item.setToolTip(tag)
             item.setData(tag, Qt.ItemDataRole.UserRole)
             item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
@@ -534,6 +552,7 @@ class MainWindow(QMainWindow):
         self._recent_behavior_tags: tuple[str, ...] = ()
         self._pending_restore_position_ms: int | None = None
         self._autosave_enabled = bool(load_session().get("autosave"))
+        self._continuous_mode = False
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -1250,6 +1269,11 @@ class MainWindow(QMainWindow):
         self.remember_labels_button = QPushButton("记住标签：关")
         self.remember_labels_button.setCheckable(True)
         self.remember_labels_button.setToolTip("开启后，新片段自动继承上一次行为标签")
+        self.continuous_mode_button = QPushButton("连标：关")
+        self.continuous_mode_button.setCheckable(True)
+        self.continuous_mode_button.setToolTip(
+            "连续标注模式：完成片段自动沿用上一片段全部标签，并跳到新起点继续播放（Ctrl+L）"
+        )
         self.add_button.setObjectName("addClipButton")
         self.remove_button.setObjectName("dangerButton")
         self.undo_button.setObjectName("undoButton")
@@ -1263,6 +1287,7 @@ class MainWindow(QMainWindow):
             self.next_pending_button,
             self.review_mode_button,
             self.remember_labels_button,
+            self.continuous_mode_button,
         ):
             button.setMinimumHeight(28)
             button.setSizePolicy(
@@ -1281,6 +1306,7 @@ class MainWindow(QMainWindow):
             self.clear_button,
             self.review_mode_button,
             self.remember_labels_button,
+            self.continuous_mode_button,
         ):
             secondary_actions.addWidget(button)
         layout.addLayout(primary_actions)
@@ -1296,6 +1322,9 @@ class MainWindow(QMainWindow):
         behavior_content_layout.setSpacing(8)
         self.behavior_tag_combo = BehaviorTagComboBox()
         behavior_content_layout.addWidget(self.behavior_tag_combo)
+        self.behavior_hotkey_hint = QLabel("")
+        self.behavior_hotkey_hint.setObjectName("mutedLabel")
+        behavior_content_layout.addWidget(self.behavior_hotkey_hint)
         self.historical_tags_container = QWidget()
         self.historical_tags_layout = QHBoxLayout(
             self.historical_tags_container
@@ -1483,6 +1512,18 @@ class MainWindow(QMainWindow):
     def _available_behavior_tags(self) -> tuple[str, ...]:
         return (*BEHAVIOR_LABELS, *self.project.custom_behavior_tags)
 
+    def _ordered_behavior_tags(self) -> tuple[str, ...]:
+        """Behavior tags with the most recently used ones first."""
+        available = self._available_behavior_tags()
+        available_set = set(available)
+        recent = tuple(
+            tag for tag in self._recent_behavior_tags if tag in available_set
+        )
+        return (
+            *recent,
+            *(tag for tag in available if tag not in recent),
+        )
+
     def _rebuild_behavior_controls(
         self,
         selected: Collection[str] | None = None,
@@ -1490,15 +1531,9 @@ class MainWindow(QMainWindow):
         selected_tags = (
             tuple(selected) if selected is not None else self.selected_behaviors()
         )
+        ordered_tags = self._ordered_behavior_tags()
         available_tags = self._available_behavior_tags()
         available_set = set(available_tags)
-        recent_tags = tuple(
-            tag for tag in self._recent_behavior_tags if tag in available_set
-        )
-        ordered_tags = (
-            *recent_tags,
-            *(tag for tag in available_tags if tag not in recent_tags),
-        )
         self.historical_behavior_tags = tuple(
             dict.fromkeys(
                 behavior
@@ -1509,6 +1544,7 @@ class MainWindow(QMainWindow):
         self.behavior_checks.clear()
         self.historical_tag_labels.clear()
         self.behavior_tag_combo.set_tags(ordered_tags, selected_tags)
+        self._update_behavior_hotkey_hint(ordered_tags)
         for behavior in ordered_tags:
             checkbox = QCheckBox(behavior)
             checkbox.setChecked(behavior in selected_tags)
@@ -1544,6 +1580,23 @@ class MainWindow(QMainWindow):
             self._sync_custom_tag_library()
         if hasattr(self, "behavior_filter_combo"):
             self._sync_filter_options()
+
+    def _update_behavior_hotkey_hint(self, ordered_tags) -> None:
+        pairs = [
+            f"{index + 1} {tag}"
+            for index, tag in enumerate(ordered_tags[:9])
+        ]
+        self.behavior_hotkey_hint.setText(
+            "数字键直选：" + "　".join(pairs) if pairs else ""
+        )
+
+    def _pin_behavior_tag(self, tag: str) -> None:
+        if tag not in self._available_behavior_tags():
+            return
+        rest = tuple(item for item in self._recent_behavior_tags if item != tag)
+        self._recent_behavior_tags = (tag, *rest)[:6]
+        self._rebuild_behavior_controls(self.selected_behaviors())
+        self._set_status(f"已将 {tag} 置为常用第一项")
 
     def _sync_custom_tag_library(self) -> None:
         selected_tag = self.custom_tag_library_combo.currentData()
@@ -2064,6 +2117,7 @@ class MainWindow(QMainWindow):
         self.date_edit.textChanged.connect(self._mark_project_dirty)
         self.camera_edit.textChanged.connect(self._mark_project_dirty)
         self.view_combo.currentTextChanged.connect(self._mark_project_dirty)
+        self.behavior_tag_combo.tagPinned.connect(self._pin_behavior_tag)
         self.behavior_tag_combo.selectionChanged.connect(
             self._sync_behavior_selection_from_combo
         )
@@ -2100,6 +2154,7 @@ class MainWindow(QMainWindow):
         self.next_pending_button.clicked.connect(self.confirm_and_next_pending)
         self.review_mode_button.toggled.connect(self._toggle_review_mode)
         self.remember_labels_button.toggled.connect(self._toggle_remember_labels)
+        self.continuous_mode_button.toggled.connect(self._toggle_continuous_mode)
         self.batch_edit_button.clicked.connect(self.show_batch_edit_dialog)
         self.batch_delete_button.clicked.connect(self._delete_selected_records)
         self.approve_selected_button.clicked.connect(lambda: self._set_selected_review_status("approved"))
@@ -2141,6 +2196,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+Enter", self.add_or_update_clip),
             ("Escape", self.clear_editor),
             ("Ctrl+Shift+E", self.start_export),
+            ("Ctrl+L", lambda: self.continuous_mode_button.toggle()),
         )
         for sequence, callback in actions:
             shortcut = QShortcut(QKeySequence(sequence), self)
@@ -2440,6 +2496,15 @@ class MainWindow(QMainWindow):
         if not self._project_dirty:
             return
         self.save_project()
+
+    def _toggle_continuous_mode(self, checked: bool) -> None:
+        self._continuous_mode = checked
+        self.continuous_mode_button.setText("连标：开" if checked else "连标：关")
+        self._set_status(
+            "连续标注模式已开启：自动沿用标签并续播"
+            if checked
+            else "连续标注模式已关闭"
+        )
 
     def _toggle_autosave(self, checked: bool) -> None:
         self._autosave_enabled = checked
@@ -3650,20 +3715,33 @@ class MainWindow(QMainWindow):
         self.add_button.setText("添加片段")
         self.set_clip_range(saved_end_seconds, saved_end_seconds)
         self.historical_behavior_tags = ()
-        remembered_behaviors = (
-            self._last_annotation_labels[0] if self._remember_last_labels else ()
-        )
-        self._rebuild_behavior_controls(remembered_behaviors)
+        if self._continuous_mode and self.records:
+            self.reuse_last_clip_settings(silent=True)
+        else:
+            remembered_behaviors = (
+                self._last_annotation_labels[0]
+                if self._remember_last_labels
+                else ()
+            )
+            self._rebuild_behavior_controls(remembered_behaviors)
+            self.age_combo.setCurrentIndex(0)
+            self.face_familiarity_combo.setCurrentIndex(0)
+            self.reid_familiarity_combo.setCurrentIndex(0)
+            self.person_count_spin.setValue(0)
         self.note_edit.clear()
         self._clear_event_rows()
-        self.age_combo.setCurrentIndex(0)
-        self.face_familiarity_combo.setCurrentIndex(0)
-        self.reid_familiarity_combo.setCurrentIndex(0)
-        self.person_count_spin.setValue(0)
         self.sequence_spin.setValue(
             next_sequence([record.sequence for record in self.records])
         )
         self._update_filename_preview()
+        if self._continuous_mode and self.records:
+            last = self.records[-1]
+            self.player.setPosition(int(last.end_seconds * 1000))
+            if (
+                self.player.playbackState()
+                != QMediaPlayer.PlaybackState.PlayingState
+            ):
+                self.player.play()
 
     def confirm_and_next_pending(self) -> None:
         """Save the current clip, then jump to the next pending review task."""
@@ -3809,7 +3887,7 @@ class MainWindow(QMainWindow):
             if status is not None:
                 self._review_current_selected(status)
             return
-        tags = self._available_behavior_tags()
+        tags = self._ordered_behavior_tags()
         index = digit - 1
         if index < len(tags):
             self._toggle_behavior_shortcut(tags[index])
@@ -3979,7 +4057,7 @@ class MainWindow(QMainWindow):
         target = min(max(0, self.player.position() + milliseconds), duration)
         self.player.setPosition(target)
 
-    def reuse_last_clip_settings(self) -> None:
+    def reuse_last_clip_settings(self, *, silent: bool = False) -> None:
         """Copy the label fields of the most recent clip into the editor."""
         if not self.records:
             self._set_status("还没有可沿用的片段")
@@ -4001,7 +4079,8 @@ class MainWindow(QMainWindow):
         self._recent_behavior_tags = tuple(
             dict.fromkeys((*last.behaviors, *self._recent_behavior_tags))
         )[:6]
-        self._set_status(f"已沿用片段 {last.sequence:03d} 的标签设置")
+        if not silent:
+            self._set_status(f"已沿用片段 {last.sequence:03d} 的标签设置")
 
     def _update_play_button(self, state: QMediaPlayer.PlaybackState) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
