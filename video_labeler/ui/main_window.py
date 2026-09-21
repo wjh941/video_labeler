@@ -1,12 +1,16 @@
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import replace
+import json
 import os
+import platform
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import (
     QAbstractAnimation,
     QEasingCurve,
+    QProcess,
     QEvent,
     QItemSelectionModel,
     QParallelAnimationGroup,
@@ -564,6 +568,12 @@ class MainWindow(QMainWindow):
         self._autosave_enabled = bool(load_session().get("autosave"))
         self._continuous_mode = False
         self._pinned_behavior_tags: tuple[str, ...] = ()
+        self._activity_marks: list[int] = []
+        self._activity_process: QProcess | None = None
+        self._activity_buffer = b""
+        self._activity_cancelled = False
+        self._project_readonly = False
+        self._project_lock_path_owned: Path | None = None
         self._review_mode = False
         self._remember_last_labels = False
         self.historical_tag_labels: dict[str, QLabel] = {}
@@ -970,6 +980,11 @@ class MainWindow(QMainWindow):
         self.project_menu.addAction(self.import_full_csv_action)
         self.project_menu.addAction(self.validate_project_action)
         self.project_menu.addAction(self.statistics_action)
+        self.annotator_stats_action = QAction("按标注人统计", self)
+        self.annotator_stats_action.triggered.connect(
+            self.show_annotator_statistics
+        )
+        self.project_menu.addAction(self.annotator_stats_action)
         self.project_menu.addAction(self.export_statistics_action)
         self.project_menu.addAction(self.load_plugin_action)
         self.project_menu.addAction(self.list_exporters_action)
@@ -1092,9 +1107,20 @@ class MainWindow(QMainWindow):
         position_layout.addWidget(self.timeline_slider, stretch=1)
         position_layout.addWidget(self.duration_label)
         position_layout.addWidget(self.frame_info_label)
+        self.activity_scan_button = QPushButton("检测")
+        self.activity_scan_button.setObjectName("secondaryButton")
+        self.activity_scan_button.setMaximumWidth(56)
+        self.activity_scan_button.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self.activity_scan_button.setToolTip(
+            "画面活动检测：后台扫描画面变化并标记在时间轴上，用 [ / ] 键跳转；扫描中再点一次可停止"
+        )
+        self.activity_scan_button.clicked.connect(self._toggle_activity_scan)
+        position_layout.addWidget(self.activity_scan_button)
         self.goto_edit = QLineEdit()
-        self.goto_edit.setPlaceholderText("跳转 如 1:23.456")
-        self.goto_edit.setMaximumWidth(150)
+        self.goto_edit.setPlaceholderText("跳转 1:23.4")
+        self.goto_edit.setMaximumWidth(124)
         self.goto_edit.setToolTip("输入时间码跳转，支持 1:23.456 / 0:01:23 / 83.5")
         self.goto_edit.returnPressed.connect(self._jump_to_timecode)
         position_layout.addWidget(self.goto_edit)
@@ -2163,6 +2189,7 @@ class MainWindow(QMainWindow):
         self.set_start_button.clicked.connect(self._set_start_from_player)
         self.set_end_button.clicked.connect(self._set_end_from_player)
         self.timeline_slider.valueChanged.connect(self._seek_to_milliseconds)
+        self.timeline_slider.range_drafted.connect(self._apply_drafted_range)
         self.timeline_slider.segment_range_changed.connect(
             self._set_clip_range_from_timeline
         )
@@ -2405,6 +2432,7 @@ class MainWindow(QMainWindow):
         self.records = entry.segments
         self.source_path = entry.path
         self.source_name = entry.path.name
+        self._reset_activity_scan()
         self.source_label.setText(entry.path.name)
         self.video_info_title.setText(entry.path.name)
         meta = entry.metadata or {}
@@ -2545,6 +2573,192 @@ class MainWindow(QMainWindow):
             or "unknown"
         )
 
+    _ACTIVITY_SCENE_THRESHOLD = 0.05
+    _ACTIVITY_GAP_MS = 2_000
+
+    def _apply_drafted_range(self, start_ms: int, end_ms: int) -> None:
+        if self._editing_index is not None:
+            self._editing_index = None
+            self.add_button.setText("添加片段")
+        self.set_clip_range(start_ms / 1000.0, end_ms / 1000.0)
+        self._set_status(
+            f"已框选 {start_ms / 1000.0:.2f}s - {end_ms / 1000.0:.2f}s，"
+            "可拖边缘微调，按回车完成片段"
+        )
+
+    def _reset_activity_scan(self) -> None:
+        """终止进行中的扫描并清空标记（切换视频/工程时调用）。"""
+        if self._activity_process is not None:
+            self._activity_cancelled = True
+            self._activity_process.kill()
+            self._activity_process = None
+        self._activity_marks = []
+        if hasattr(self, "timeline_slider"):
+            self.timeline_slider.set_activity_marks([])
+        if hasattr(self, "activity_scan_button"):
+            self.activity_scan_button.setText("检测")
+
+    def _toggle_activity_scan(self) -> None:
+        if self._activity_process is not None:
+            self._activity_cancelled = True
+            self._activity_process.kill()
+            self._activity_process = None
+            self.activity_scan_button.setText("检测")
+            self._set_status("已取消画面活动检测")
+            return
+        source = self.source_path
+        if source is None:
+            self._show_error("无法检测", "请先导入视频文件。")
+            return
+        ffmpeg = self.ffmpeg_edit.text().strip() or "ffmpeg"
+        process = QProcess(self)
+        process.setProcessChannelMode(
+            QProcess.ProcessChannelMode.SeparateChannels
+        )
+        filter_expr = (
+            "select='gt(scene," f"{self._ACTIVITY_SCENE_THRESHOLD})'"
+            ",metadata=print:file=-"
+        )
+        process.setProgram(ffmpeg)
+        process.setArguments(
+            [
+                "-hide_banner",
+                "-i",
+                str(source),
+                "-an",
+                "-vf",
+                filter_expr,
+                "-f",
+                "null",
+                "-",
+            ]
+        )
+        process.readyReadStandardOutput.connect(
+            lambda p=process: self._consume_activity_output(p)
+        )
+        process.readyReadStandardError.connect(
+            lambda p=process: self._consume_activity_progress(p)
+        )
+        process.finished.connect(
+            lambda code, status, p=process: self._finish_activity_scan(p, code)
+        )
+        process.errorOccurred.connect(
+            lambda error, p=process: self._activity_scan_error(p, error)
+        )
+        self._activity_buffer = b""
+        self._activity_cancelled = False
+        self._activity_marks = []
+        self.timeline_slider.set_activity_marks([])
+        self._activity_process = process
+        process.start()
+        self.activity_scan_button.setText("停止检测")
+        self._set_status(
+            f"画面活动检测已启动（阈值 {self._ACTIVITY_SCENE_THRESHOLD}），"
+            "长视频扫描需要一些时间，可继续标注，结果实时上图"
+        )
+
+    def _consume_activity_output(self, process: QProcess) -> None:
+        if process is not self._activity_process:
+            return
+        self._activity_buffer += bytes(process.readAllStandardOutput())
+        *lines, self._activity_buffer = self._activity_buffer.split(b"\n")
+        changed = False
+        for raw in lines:
+            match = re.search(rb"pts_time:([0-9.]+)", raw)
+            if not match:
+                continue
+            mark_ms = int(float(match.group(1)) * 1000)
+            if not self._activity_marks or self._activity_marks[-1] != mark_ms:
+                self._activity_marks.append(mark_ms)
+                changed = True
+        if changed:
+            self.timeline_slider.set_activity_marks(self._activity_marks)
+
+    def _consume_activity_progress(self, process: QProcess) -> None:
+        if process is not self._activity_process:
+            return
+        text = bytes(process.readAllStandardError()).decode(
+            "utf-8", errors="replace"
+        )
+        matches = list(re.finditer(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", text))
+        if not matches or self.player.source().isEmpty():
+            return
+        last = matches[-1]
+        position_ms = (
+            (int(last.group(1)) * 3600 + int(last.group(2)) * 60)
+            + float(last.group(3))
+        ) * 1000
+        duration = max(1, self.player.duration())
+        percent = min(100, int(position_ms * 100 / duration))
+        self.activity_scan_button.setText(f"检测中 {percent}%")
+
+    def _activity_scan_error(
+        self, process: QProcess, error
+    ) -> None:
+        if process is not self._activity_process:
+            return
+        self._activity_process = None
+        self.activity_scan_button.setText("检测")
+        self._set_status(
+            "画面活动检测启动失败：请检查导出设置中的 FFmpeg 路径"
+        )
+        process.deleteLater()
+
+    def _finish_activity_scan(
+        self, process: QProcess, code: int, status=None
+    ) -> None:
+        mine = process is self._activity_process
+        if mine:
+            self._activity_process = None
+            self.activity_scan_button.setText("检测")
+        process.deleteLater()
+        if not mine:
+            return
+        count = len(self._activity_marks)
+        if getattr(self, "_activity_cancelled", False):
+            self._activity_cancelled = False
+            self._set_status(f"画面活动检测已取消，保留 {count} 处标记")
+            return
+        self._set_status(
+            f"画面活动检测完成：共 {count} 处变化已标记；用 [ / ] 跳转"
+            if code == 0
+            else f"画面活动检测中断（退出码 {code}），已保留 {count} 处标记"
+        )
+
+    def _jump_activity(self, direction: int) -> None:
+        marks = self.timeline_slider.activity_marks()
+        if not marks:
+            self._set_status("尚无活动标记；点击播放条右侧「活动检测」开始扫描")
+            return
+        position = self.player.position()
+        if direction > 0:
+            target = next(
+                (mark for mark in marks if mark > position + 250),
+                None,
+            )
+        else:
+            target = next(
+                (
+                    mark
+                    for mark in reversed(marks)
+                    if mark < position - 250
+                ),
+                None,
+            )
+        if target is None:
+            self._set_status("已到达活动标记边缘")
+            return
+        self.player.setPosition(target)
+        self._set_status(
+            f"跳转到活动点 {self._format_clock(target)}"
+        )
+
+    def _format_clock(self, ms: int) -> str:
+        total_secs = int(ms / 1000)
+        hours, rem = divmod(total_secs, 3600)
+        minutes, secs = divmod(rem, 60)
+        return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
     def _persist_session(self) -> None:
         """Snapshot project/video/position so the next run can restore it."""
         try:
@@ -2561,7 +2775,12 @@ class MainWindow(QMainWindow):
         """Silently save the open project; must never open dialogs."""
         if not self._autosave_enabled or self._project_path is None:
             return
+        if self._project_lock_path_owned is not None:
+            # 锁心跳：定期续期，避免长会话被他人视为过期接管
+            self._acquire_project_lock(self._project_path)
         if not self._project_dirty:
+            return
+        if getattr(self, "_project_readonly", False):
             return
         self.save_project()
 
@@ -2641,6 +2860,9 @@ class MainWindow(QMainWindow):
 
     def _clear_project_workspace(self) -> None:
         self._backup_timer.stop()
+        self._reset_activity_scan()
+        self._release_project_lock()
+        self._project_readonly = False
         self.project = new_project()
         self.records = []
         self.source_path = None
@@ -2668,7 +2890,130 @@ class MainWindow(QMainWindow):
         self._update_history_controls()
         self._set_status("已新建工程")
 
+    _PROJECT_LOCK_STALE_SECONDS = 600
+
+    def _project_lock_path(self, path: Path) -> Path:
+        return path.with_name(path.name + ".lock")
+
+    def _acquire_project_lock(self, path: Path) -> bool:
+        """返回 False 表示工程正被他人编辑，应以只读方式打开。"""
+        lock_path = self._project_lock_path(path)
+        if lock_path.exists():
+            try:
+                info = json.loads(lock_path.read_text(encoding="utf-8"))
+                stamp = datetime.fromisoformat(
+                    str(info.get("ts", "")).replace("Z", "+00:00")
+                )
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=timezone.utc)
+                age = datetime.now(timezone.utc) - stamp
+                same_process = int(info.get("pid", -1)) == os.getpid()
+                if (
+                    not same_process
+                    and age.total_seconds()
+                    < self._PROJECT_LOCK_STALE_SECONDS
+                ):
+                    return False
+            except (OSError, ValueError, TypeError):
+                pass
+        self._write_project_lock(lock_path)
+        return True
+
+    def _write_project_lock(self, lock_path: Path) -> None:
+        try:
+            lock_path.write_text(
+                json.dumps(
+                    {
+                        "user": self._default_annotator(),
+                        "host": platform.node(),
+                        "pid": os.getpid(),
+                        "ts": datetime.now(timezone.utc)
+                        .replace(microsecond=0)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self._project_lock_path_owned = lock_path
+        except OSError:
+            pass
+
+    def _release_project_lock(self) -> None:
+        lock_path = getattr(self, "_project_lock_path_owned", None)
+        if lock_path is not None and lock_path.exists():
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+        self._project_lock_path_owned = None
+
+    def _annotator_statistics_rows(self) -> list[tuple[str, int, int, int, int]]:
+        counters: dict[str, dict[str, int]] = {}
+        for record in self.records:
+            name = record.annotator or "(未记录)"
+            row = counters.setdefault(
+                name,
+                {"total": 0, "pending": 0, "approved": 0, "needs_fix": 0, "rejected": 0},
+            )
+            row["total"] += 1
+            if record.review_status in row:
+                row[record.review_status] += 1
+        return [
+            (
+                name,
+                counts["total"],
+                counts["pending"],
+                counts["approved"],
+                counts["needs_fix"] + counts["rejected"],
+            )
+            for name, counts in sorted(
+                counters.items(), key=lambda item: -item[1]["total"]
+            )
+        ]
+
+    def show_annotator_statistics(self) -> None:
+        rows = self._annotator_statistics_rows()
+        if not rows:
+            self._set_status("当前没有片段可统计")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("按标注人统计")
+        dialog.setMinimumWidth(560)
+        layout = QVBoxLayout(dialog)
+        table = QTableWidget(len(rows), 5, dialog)
+        table.setHorizontalHeaderLabels(
+            ("标注人", "总片段", "待审核", "通过", "需修正/剔除")
+        )
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        for row, values in enumerate(rows):
+            values = (
+                values[0], str(values[1]), str(values[2]), str(values[3]), str(values[4]),
+            )
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(value))
+        table.horizontalHeader().setStretchLastSection(True)
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        hint = QLabel("统计范围：当前工程全部片段（含所有视频）")
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
     def save_project(self) -> None:
+        if getattr(self, "_project_readonly", False):
+            self._show_error(
+                "工程为只读",
+                "该工程打开时正被其他人编辑，已以只读方式载入；"
+                "请等待对方关闭后重新打开，或另存为新工程。",
+            )
+            return
         project_path = self._project_path
         if project_path is None:
             filename, _ = QFileDialog.getSaveFileName(
@@ -2691,9 +3036,24 @@ class MainWindow(QMainWindow):
             )
             return
         self._project_dirty = False
+        if self._project_lock_path_owned is not None and not self._acquire_project_lock(
+            self._project_path
+        ):
+            self._project_readonly = True
+            self._show_error(
+                "工程已被接管",
+                "其他用户已开始编辑该工程，本次保存被拒绝以免覆盖；"
+                "请另存为新工程。",
+            )
+            return
         self._set_status(f"已保存工程：{self._project_path}")
 
     def save_project_version(self) -> None:
+        if getattr(self, "_project_readonly", False):
+            self._show_error(
+                "工程为只读", "只读模式下不能创建版本快照。"
+            )
+            return
         if self._project_path is None:
             self.save_project()
         if self._project_path is None:
@@ -2774,6 +3134,8 @@ class MainWindow(QMainWindow):
             self._set_status(f"已从版本快照恢复工程：{Path(filename).name}")
 
     def _load_project_path(self, path: Path) -> bool:
+        self._reset_activity_scan()
+        self._release_project_lock()
         try:
             project = load_project_v2(path)
         except (OSError, ValueError) as error:
@@ -2786,6 +3148,23 @@ class MainWindow(QMainWindow):
         self.project = project
         self._project_path = Path(path)
         self._project_dirty = False
+        if not self._acquire_project_lock(Path(path)):
+            self._project_readonly = True
+            try:
+                info = json.loads(
+                    self._project_lock_path(Path(path)).read_text(
+                        encoding="utf-8"
+                    )
+                )
+            except (OSError, ValueError):
+                info = {}
+            self._set_status(
+                "注意：工程可能正被 "
+                f"{info.get('user', '?')}@{info.get('host', '?')} 编辑，"
+                "已以只读方式打开；保存将被拒绝"
+            )
+        else:
+            self._project_readonly = False
         self._active_video_histories = {}
         self.historical_behavior_tags = ()
         self._rebuild_behavior_controls(())
@@ -3057,8 +3436,21 @@ class MainWindow(QMainWindow):
             )
             existing_outputs = {record.output for record in self.records}
             sequence = next_sequence(record.sequence for record in self.records)
+            now_stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            annotator = (
+                self.annotator_edit.text().strip() or self._default_annotator()
+            )
             imported: list[ClipRecord] = []
+            skipped_overlaps = 0
             for annotation in annotations:
+                if any(
+                    record.source == source
+                    and annotation.start_seconds < record.end_seconds - 0.25
+                    and annotation.end_seconds > record.start_seconds + 0.25
+                    for record in (*self.records, *imported)
+                ):
+                    skipped_overlaps += 1
+                    continue
                 behaviors = tuple(
                     dict.fromkeys(
                         normalize_label_token(tag, "行为标签")
@@ -3088,6 +3480,10 @@ class MainWindow(QMainWindow):
                         polarity=polarity,
                         lighting=lighting,
                         sequence=sequence,
+                        note="预标注",
+                        annotator=annotator,
+                        created_at=now_stamp,
+                        updated_at=now_stamp,
                     )
                 )
                 existing_outputs.add(output)
@@ -3106,7 +3502,10 @@ class MainWindow(QMainWindow):
         self._refresh_table()
         self._mark_project_dirty()
         self._update_history_controls()
-        self._set_status(f"已导入 {len(imported)} 个待复核预标注片段")
+        self._set_status(
+            f"已导入 {len(imported)} 个待复核预标注片段"
+            + (f"，跳过 {skipped_overlaps} 条重叠" if skipped_overlaps else "")
+        )
 
     def save_full_csv(self) -> None:
         if not self.records:
@@ -3971,6 +4370,14 @@ class MainWindow(QMainWindow):
                 return
             if text.lower() == "k":
                 self._jump_to_pending(1)
+                event.accept()
+                return
+            if text == "[":
+                self._jump_activity(-1)
+                event.accept()
+                return
+            if text == "]":
+                self._jump_activity(1)
                 event.accept()
                 return
         super().keyPressEvent(event)
@@ -5148,6 +5555,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if self._confirm_discard_dirty_project():
+            self._release_project_lock()
             self._persist_session()
             app_logger().info("应用退出")
             event.accept()

@@ -9,6 +9,9 @@ from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider
 
 class SegmentTimelineSlider(QSlider):
     segment_range_changed = Signal(int, int)
+    range_drafted = Signal(int, int)
+
+    _DRAFT_MIN_MS = 200
 
     def __init__(self, parent=None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
@@ -16,8 +19,13 @@ class SegmentTimelineSlider(QSlider):
         self._segment_end: int | None = None
         self._dragged_edge: str | None = None
         self._segment_ranges: list[tuple[int, int]] = []
+        self._draft_start: int | None = None
+        self._draft_value: int | None = None
+        self._activity_marks: list[int] = []
         self.setMouseTracking(True)
-        self.setToolTip("拖动片段左右边缘调整起止时间")
+        self.setToolTip(
+            "拖动片段左右边缘调整起止时间；在空白处按住拖动可直接框选新片段"
+        )
 
     def set_segment_range(self, start: int, end: int) -> None:
         low = self.minimum()
@@ -41,6 +49,18 @@ class SegmentTimelineSlider(QSlider):
         if normalized != self._segment_ranges:
             self._segment_ranges = normalized
             self.update()
+
+    def set_activity_marks(self, marks: list[int]) -> None:
+        low, high = self.minimum(), self.maximum()
+        normalized = sorted(
+            int(mark) for mark in marks if low <= int(mark) <= high
+        )
+        if normalized != self._activity_marks:
+            self._activity_marks = normalized
+            self.update()
+
+    def activity_marks(self) -> list[int]:
+        return list(self._activity_marks)
 
     def segment_range(self) -> tuple[int, int] | None:
         if self._segment_start is None or self._segment_end is None:
@@ -123,11 +143,39 @@ class SegmentTimelineSlider(QSlider):
             2,
         )
 
+    def _draw_activity_marks(self, painter: QPainter, groove) -> None:
+        if not self._activity_marks:
+            return
+        painter.setPen(QPen(QColor("#f59e0b"), 1))
+        for mark in self._activity_marks:
+            x = self._position_for_value(mark)
+            painter.drawLine(int(x), 15, int(x), groove.bottom() - 2)
+
+    def _draw_draft_range(self, painter: QPainter, groove) -> None:
+        if self._draft_start is None or self._draft_value is None:
+            return
+        left_value = min(self._draft_start, self._draft_value)
+        right_value = max(self._draft_start, self._draft_value)
+        left = self._position_for_value(left_value)
+        right = self._position_for_value(right_value)
+        center_y = self.height() / 2
+        painter.setPen(QPen(QColor("#22c55e"), 1, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(34, 197, 94, 60))
+        painter.drawRoundedRect(
+            QRectF(left, center_y - 4, max(4, right - left), 8), 4, 4
+        )
+        painter.setBrush(QColor("#facc15"))
+        for position in (left, right):
+            painter.drawRoundedRect(
+                QRectF(position - 3, center_y - 6, 6, 12), 3, 3
+            )
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         painter = QPainter(self)
         groove = self._groove_rect()
         self._draw_time_ticks(painter, groove)
+        self._draw_activity_marks(painter, groove)
         segment = self.segment_range()
         if (segment is None or segment[1] <= segment[0]) and not self._segment_ranges:
             self._draw_playback_progress(painter, groove)
@@ -168,6 +216,7 @@ class SegmentTimelineSlider(QSlider):
                 Qt.AlignmentFlag.AlignCenter,
                 self._format_time(segment[1]),
             )
+        self._draw_draft_range(painter, groove)
 
     @staticmethod
     def _format_time(milliseconds: int) -> str:
@@ -179,35 +228,44 @@ class SegmentTimelineSlider(QSlider):
             return f"{hours}:{minutes:02d}:{secs:02d}"
         return f"{minutes}:{secs:02d}.{ms:03d}"
 
-    def mouseMoveEvent(self, event) -> None:
-        groove = self._groove_rect()
-        span = max(1, groove.width())
-        value = QStyle.sliderValueFromPosition(
-            self.minimum(),
-            self.maximum(),
-            int(event.position().x()) - groove.x(),
-            span,
-        )
-        self.setToolTip(self._format_time(value))
-        super().mouseMoveEvent(event)
-
     def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
         segment = self.segment_range()
-        if event.button() == Qt.MouseButton.LeftButton and segment is not None:
+        if segment is not None:
             self._dragged_edge = self._edge_at_position(event.position().x())
             if self._dragged_edge is not None:
                 event.accept()
                 return
-        super().mousePressEvent(event)
+        self._draft_start = self._value_for_position(event.position().x())
+        self._draft_value = self._draft_start
+        event.accept()
+        self.update()
 
     def mouseMoveEvent(self, event) -> None:
+        hover_value = self._value_for_position(event.position().x())
         if self._dragged_edge is not None:
-            self.adjust_segment_edge(
-                self._dragged_edge, self._value_for_position(event.position().x())
-            )
+            self.adjust_segment_edge(self._dragged_edge, hover_value)
             event.accept()
             return
+        if self._draft_start is not None:
+            self._draft_value = hover_value
+            low, high = sorted((self._draft_start, self._draft_value))
+            self.setToolTip(
+                f"{self._format_time(low)} → {self._format_time(high)}"
+            )
+            self.update()
+            event.accept()
+            return
+        self.setToolTip(self._format_time(hover_value))
         edge = self._edge_at_position(event.position().x())
+        if edge is not None:
+            self.setToolTip(
+                "拖动调整片段"
+                + ("起点" if edge == "start" else "终点")
+                + f"（当前 {self._format_time(hover_value)}）"
+            )
         self.setCursor(
             Qt.CursorShape.SizeHorCursor
             if edge is not None
@@ -218,6 +276,22 @@ class SegmentTimelineSlider(QSlider):
     def mouseReleaseEvent(self, event) -> None:
         if self._dragged_edge is not None:
             self._dragged_edge = None
+            event.accept()
+            return
+        if self._draft_start is not None:
+            press = self._draft_start
+            current = self._draft_value
+            low = min(press, current)
+            high = max(press, current)
+            self._draft_start = None
+            self._draft_value = None
+            if high - low >= self._DRAFT_MIN_MS:
+                self.range_drafted.emit(low, high)
+            else:
+                # 视为单击：恢复默认的点按跳转行为
+                self.setValue(press)
+                self.sliderReleased.emit()
+            self.update()
             event.accept()
             return
         super().mouseReleaseEvent(event)

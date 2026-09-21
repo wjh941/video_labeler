@@ -1238,11 +1238,13 @@ def test_table_batch_operation_chinese_text(qt_app):
     ]
     window._refresh_table()
 
+    # 未加载视频时筛选区保持禁用（每次筛选会恢复禁用态），
+    # 此处直接调用清空逻辑验证筛选行为本身
     window.behavior_filter_combo.setCurrentData("fall")
     assert window.task_table.isRowHidden(0)
     assert not window.task_table.isRowHidden(1)
 
-    window.clear_filters_button.click()
+    window.clear_table_filters()
     assert not window.task_table.isRowHidden(0)
     assert not window.task_table.isRowHidden(1)
 
@@ -2581,8 +2583,10 @@ def test_workspace_uses_two_parallel_panels(qt_app):
 
     layout = window.workspace_row.layout()
     assert layout.count() == 2
-    assert layout.itemAt(0).widget() is window.video_panel
+    assert layout.itemAt(0).widget() is window.media_column
     assert layout.itemAt(1).widget() is window.annotation_workspace
+    media_layout = window.media_column.layout()
+    assert media_layout.itemAt(0).widget() is window.video_panel
 
 
 def test_right_side_modules_are_collapsible_groups(qt_app):
@@ -2992,6 +2996,213 @@ def test_behavior_chips_are_always_visible_and_clickable(qt_app):
     first.click()
     assert "fall" not in window.selected_behaviors()
     assert not first.isChecked()
+
+
+def test_timeline_drag_emits_range_and_main_window_applies(qt_app):
+    from PySide6.QtCore import QPointF, Qt, QEvent
+    from PySide6.QtGui import QMouseEvent
+
+    window = MainWindow()
+    window.timeline_slider.setRange(0, 60_000)
+    window.resize(1280, 800)
+    window.show()
+    QTest.qWait(80)  # 等待延迟布局（视频高度重算）完成
+    qt_app.processEvents()
+    slider = window.timeline_slider
+    slider.resize(640, 40)  # offscreen 下布局不定形，手动固定几何
+
+    press_x = slider._position_for_value(5_000)
+    release_x = slider._position_for_value(9_000)
+    emitted: list[tuple[int, int]] = []
+    slider.range_drafted.connect(lambda a, b: emitted.append((a, b)))
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(press_x, 20),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    move = QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(release_x, 20),
+        Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(release_x, 20),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    slider.mousePressEvent(press)
+    slider.mouseMoveEvent(move)
+    slider.mouseReleaseEvent(release)
+
+    assert len(emitted) == 1
+    low, high = emitted[0]
+    # 布局时序导致的取整差异应在 ±0.5s 内
+    assert abs(low / 1000 - 5.0) < 0.5
+    assert abs(high / 1000 - 9.0) < 0.5
+    assert window.start_spin.value() == low / 1000
+    assert window.end_spin.value() == high / 1000
+
+
+def test_timeline_click_without_drag_seeks_only(qt_app):
+    from PySide6.QtCore import QPointF, Qt, QEvent
+    from PySide6.QtGui import QMouseEvent
+
+    window = MainWindow()
+    window.timeline_slider.setRange(0, 60_000)
+    window.resize(1280, 800)
+    window.show()
+    QTest.qWait(80)  # 等待延迟布局（视频高度重算）完成
+    qt_app.processEvents()
+    slider = window.timeline_slider
+    slider.resize(640, 40)  # offscreen 下布局不定形，手动固定几何
+
+    x = slider._position_for_value(12_000)
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(x, 20),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease, QPointF(x, 20),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    slider.mousePressEvent(press)
+    press_value = slider._draft_start
+    slider.mouseReleaseEvent(release)
+
+    assert slider.value() == press_value  # 单击=跳转，不建段
+    assert window.start_spin.value() == 0.0
+
+
+def test_activity_marks_set_and_jump_reports(qt_app):
+    window = MainWindow()
+    window.timeline_slider.setRange(0, 60_000)
+    window.timeline_slider.set_activity_marks([3_000, 15_000, 45_000])
+    assert window.timeline_slider.activity_marks() == [3_000, 15_000, 45_000]
+
+    window._jump_activity(1)  # 无媒体时 position=0，应跳到第一个标记
+    assert "活动点" in window.status_label.text()
+
+
+def test_preannotation_import_skips_overlaps_and_stamps_audit(qt_app, tmp_path):
+    from video_labeler.preannotation_io import PreAnnotation
+    from video_labeler.models import ClipRecord as _ClipRecord
+
+    window = MainWindow()
+    window.source_path = tmp_path / "camera.mp4"
+    window.source_name = "camera.mp4"
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.records.append(
+        _ClipRecord(
+            "camera.mp4", 10.0, 12.0, "exist.mp4", ("fall",), "pos",
+            "daytime", 1,
+        )
+    )
+    annotations = [
+        PreAnnotation(10.5, 11.5, ("fall",), "pos", "daytime"),  # 重叠→跳过
+        PreAnnotation(20.0, 22.0, ("dog_out",), "neg", "night"),
+    ]
+    window._apply_preannotations(annotations)
+
+    assert len(window.records) == 2
+    added = window.records[1]
+    assert added.start_seconds == 20.0
+    assert added.note == "预标注"
+    assert added.annotator
+    assert added.created_at.endswith("Z")
+
+
+def test_project_lock_blocks_fresh_and_allows_stale(qt_app, tmp_path):
+    import json as _json
+    from datetime import datetime, timedelta, timezone as _tz
+
+    window = MainWindow()
+    project = tmp_path / "work.labelproj"
+    lock = window._project_lock_path(project)
+    fresh = datetime.now(_tz.utc) - timedelta(seconds=30)
+    lock.write_text(
+        _json.dumps(
+            {"user": "other", "host": "pc2", "pid": 999999,
+             "ts": fresh.isoformat().replace("+00:00", "Z")}
+        ),
+        encoding="utf-8",
+    )
+    assert window._acquire_project_lock(project) is False  # 新鲜锁→只读
+
+    stale = datetime.now(_tz.utc) - timedelta(minutes=11)
+    lock.write_text(
+        _json.dumps(
+            {"user": "other", "host": "pc2", "pid": 999999,
+             "ts": stale.isoformat().replace("+00:00", "Z")}
+        ),
+        encoding="utf-8",
+    )
+    assert window._acquire_project_lock(project) is True  # 超时→接管
+    assert window._project_lock_path_owned == lock
+    window._release_project_lock()
+    assert not lock.exists()
+
+
+def test_annotator_statistics_rows_group_by_annotator(qt_app):
+    window = MainWindow()
+    window.records.extend([
+        ClipRecord("a.mp4", 1, 2, "o1.mp4", ("fall",), "pos", "daytime", 1,
+                   annotator="zhang"),
+        ClipRecord("a.mp4", 2, 3, "o2.mp4", ("fall",), "pos", "daytime", 2,
+                   annotator="zhang", review_status="approved"),
+        ClipRecord("a.mp4", 3, 4, "o3.mp4", ("fall",), "pos", "daytime", 3),
+    ])
+    rows = window._annotator_statistics_rows()
+    assert rows[0][0] == "zhang" and rows[0][1] == 2  # zhang 2 条排前
+    assert rows[0][3] == 1  # 通过 1
+    assert rows[1][0] == "(未记录)" and rows[1][1] == 1
+
+
+def test_readonly_autosave_tick_is_silent(qt_app, tmp_path):
+    window = MainWindow()
+    project = tmp_path / "locked.labelproj"
+    window._project_path = project
+    window._project_dirty = True
+    window._project_readonly = True
+    window._autosave_tick()  # 只读：静默跳过，不写文件不弹窗
+    assert not project.exists()
+
+
+def test_project_lock_tolerates_naive_timestamp(qt_app, tmp_path):
+    import json as _json
+
+    window = MainWindow()
+    project = tmp_path / "naive.labelproj"
+    lock = window._project_lock_path(project)
+    lock.write_text(
+        _json.dumps(
+            {"user": "o", "host": "h", "pid": 1, "ts": "2020-01-01T00:00:00"}
+        ),
+        encoding="utf-8",
+    )
+    # 无时区时间戳：按 UTC 处理（远已过期 → 可接管），且不抛 TypeError
+    assert window._acquire_project_lock(project) is True
+
+
+def test_timeline_drag_clears_editing_mode(qt_app, tmp_path):
+    window = MainWindow()
+    window.set_source_path(tmp_path / "s.mp4")
+    window.date_edit.setText("20260729")
+    window.camera_edit.setText("cam02")
+    window.view_combo.setCurrentText("indoor")
+    window.behavior_checks["fall"].setChecked(True)
+    window.set_clip_range(1.0, 2.0)
+    window.add_or_update_clip()
+    window.task_table.selectRow(0)
+    qt_app.processEvents()
+    assert window._editing_index == 0  # 处于编辑模式
+
+    window.timeline_slider.range_drafted.emit(20_000, 25_000)
+    assert window._editing_index is None  # 框选=新建语义
+    assert window.start_spin.value() == 20.0
 
 
 def test_pin_and_unpin_tags(qt_app):
