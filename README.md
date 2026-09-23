@@ -1,5 +1,7 @@
 # 视频片段标注工具（Video Segment Labeler）
 
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PySide6](https://img.shields.io/badge/GUI-PySide6%206.7-green) ![平台](https://img.shields.io/badge/平台-Windows-lightgrey)
+
 面向**标注员和小团队**的 Windows 桌面视频标注工具：给长视频的片段打**行为标签**，用 `.labelproj` 工程管理标注结果，并通过 **FFmpeg** 批量导出 MP4 片段。
 
 - 基于 **PySide6** 构建，界面为简体中文
@@ -111,6 +113,58 @@ flowchart LR
 | 运行日志 | `%APPDATA%\VideoSegmentLabeler\logs\app.log` |
 | 自动备份 | 工程文件同目录 `.backups/` |
 | 版本快照 | 工程文件同目录 `.versions/` |
+
+## 内部逻辑
+
+### 目录结构与职责
+
+```text
+app.py                        # 程序入口：加载偏好与会话，创建主窗口
+video_labeler/
+├── ui/main_window.py         # PySide6 主窗口：时间轴、片段面板、标注工作流的全部交互
+├── segment_timeline.py       # 可拖拽片段边缘的时间轴滑块控件
+├── models.py                 # 核心数据结构：ProjectMetadata / EventRecord / ClipRecord
+├── project_io.py             # 工程读写（带校验的多视频标注文档）
+├── project_v2.py             # v2 工程序列化（可重定位媒体路径、快照）
+├── project_validation.py     # 工程级校验与质量诊断
+├── project_statistics.py     # 确定性数据集统计（复核与报告用）
+├── ffmpeg_service.py         # FFmpeg/FFprobe 封装：命令构建、时长解析、导出结果校验
+├── frame_cache.py            # 抽帧缓存，避免重复探测
+├── media_locator.py          # 缺失媒体的安全重定位
+├── export_worker.py          # 后台导出线程与失败报告
+├── builtin_exporters.py      # 内置数据集导出器（经插件注册表暴露）
+├── plugin_api.py             # 稳定的导出器扩展 API 与注册表
+├── csv_io.py / dataset_io.py # CSV 读写 / 兼容 CSV 的数据集导出
+├── preannotation_io.py       # 预标注 JSON 的校验导入
+├── report_io.py              # 项目复核统计的可移植 JSON 报告
+├── history.py                # 片段级撤销/重做历史
+├── session_io.py / preferences_io.py / logging_setup.py
+└── naming.py                 # 片段命名规范：视图/标签归一化与导出文件名构建
+tests/                        # 32 个测试文件：单元 + FFmpeg 集成测试
+```
+
+### 模块关系与数据流
+
+```mermaid
+flowchart LR
+    MW["ui/main_window.py<br/>主窗口与交互"] --> TL["segment_timeline.py<br/>时间轴控件"]
+    MW --> MODELS["models.py<br/>EventRecord / ClipRecord"]
+    MW --> PV2["project_v2.py<br/>.labelproj 工程读写"]
+    PV2 --> VAL["project_validation.py<br/>质量诊断"]
+    MW --> FFS["ffmpeg_service.py<br/>FFprobe 探测 / 导出命令"]
+    FFS --> FC["frame_cache.py"]
+    MW --> EXP["export_worker.py<br/>后台导出"]
+    EXP --> PLG["plugin_api.py 注册表"]
+    PLG --> BIE["builtin_exporters.py"]
+    BIE --> CSV["csv_io.py / dataset_io.py / naming.py"]
+```
+
+### 关键机制
+
+- **工程格式 v2**：`project_v2.py` 序列化 `.labelproj`，媒体路径可重定位——换电脑/挪目录后由 `media_locator.py` 安全找回
+- **导出双通道**：内置 FFmpeg 导出与第三方导出器走同一个 `plugin_api.py` 注册表，`export_worker.py` 在后台线程执行并在失败时写出报告
+- **可撤销**：`history.py` 为片段操作维护快照栈，配合 `Ctrl+Z / Ctrl+Y`
+- **安全网**：每次保存自动备份到 `.backups/`，版本快照写 `.versions/`，关键动作进轮转日志（`logging_setup.py`）
 
 ## 打包发布
 
