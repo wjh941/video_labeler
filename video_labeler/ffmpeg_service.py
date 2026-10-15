@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 
@@ -155,11 +156,17 @@ def resolve_ffprobe(ffmpeg_path: str) -> str:
     if configured_path:
         path = Path(configured_path).expanduser()
         if path.is_file():
-            ffprobe = path.with_name("ffprobe.exe")
-            if ffprobe.is_file():
-                return str(ffprobe)
+            # Windows 下 ffprobe 与 ffmpeg 同目录且带 .exe 后缀;其余平台无后缀、
+            # 且可能不在 ffmpeg 同目录(发行版拆包),先找同目录再退回 PATH
+            candidates = [path.with_name("ffprobe.exe")] if sys.platform == "win32" else [
+                path.with_name("ffprobe"),
+                path.with_name("ffprobe.exe"),
+            ]
+            for ffprobe in candidates:
+                if ffprobe.is_file():
+                    return str(ffprobe)
             raise FileNotFoundError(
-                f"configured FFprobe path does not exist: {ffprobe}"
+                f"configured FFprobe path does not exist: {candidates[0]}"
             )
 
     ffprobe = shutil.which("ffprobe")

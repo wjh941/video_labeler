@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 from typing import Sequence
 
+from .ffmpeg_service import format_seconds as _format_seconds
+from .ffmpeg_service import parse_time_to_seconds as _parse_seconds
 from .models import ClipRecord, EventRecord
 from .naming import parse_filename
 
@@ -20,36 +22,6 @@ FULL_CSV_FIELDS = (
 )
 # Audit columns appended later; older CSVs without them stay importable.
 FULL_CSV_AUDIT_FIELDS = ("annotator", "created_at", "updated_at")
-
-
-def _parse_seconds(value: str) -> float:
-    text = value.strip()
-    if not text:
-        raise ValueError("empty time")
-    if ":" not in text:
-        seconds = float(text)
-    else:
-        parts = text.split(":")
-        if len(parts) > 3:
-            raise ValueError(f"invalid time: {value}")
-
-        seconds = 0.0
-        for part in parts:
-            seconds = seconds * 60 + float(part)
-    if not math.isfinite(seconds):
-        raise ValueError("time must be finite")
-    return seconds
-
-
-def _format_seconds(value: float) -> str:
-    if not math.isfinite(value):
-        raise ValueError("time must be finite")
-    if value < 0:
-        raise ValueError("time cannot be negative")
-
-    hours, remainder = divmod(value, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{int(hours):02d}:{int(minutes):02d}:{seconds:06.3f}"
 
 
 def _parse_events_json(value: str) -> list[EventRecord]:
