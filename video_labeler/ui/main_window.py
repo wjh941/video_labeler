@@ -85,7 +85,19 @@ from ..csv_io import (
     write_clip_csv,
     write_full_clip_csv,
 )
-from ..project_validation import validate_project, export_quality_issues
+from ..project_validation import validate_project
+from ..export_coordinator import (
+    EXPORT_SCOPE_CHOICES,
+    blocking_export_issues,
+    collect_project_export_sources,
+    ensure_export_targets_ready,
+    estimate_export_bytes,
+    format_blocking_issues,
+    format_export_preview_message,
+    format_export_size,
+    interpret_export_scope,
+    select_records_for_scope,
+)
 from ..project_statistics import calculate_project_statistics
 from ..report_io import write_project_statistics_report
 from ..builtin_exporters import register_builtin_exporters
@@ -5208,18 +5220,9 @@ class MainWindow(QMainWindow):
             self._start_export(*prepared)
 
     def start_project_export(self) -> None:
-        records: list[ClipRecord] = []
-        input_paths: list[Path] = []
-        missing_sources = []
-        for video in self.project.videos:
-            if not video.segments:
-                continue
-            if not video.path.is_file():
-                missing_sources.append(str(video.path))
-                continue
-            records.extend(video.segments)
-            input_paths.extend([video.path] * len(video.segments))
-
+        records, input_paths, missing_sources = collect_project_export_sources(
+            self.project.videos
+        )
         if missing_sources:
             self._show_error(
                 "视频源不存在",
@@ -5234,85 +5237,47 @@ class MainWindow(QMainWindow):
     def _prepare_export_records(self, records, input_paths):
         policy, accepted = QInputDialog.getItem(
             self, "导出审核范围", "选择导出范围",
-            ("全部片段", "仅导出审核通过", "取消导出"), 0, False
+            EXPORT_SCOPE_CHOICES, 0, False
         )
-        if not accepted or policy == "取消导出":
+        scope = interpret_export_scope(policy, accepted)
+        if scope.canceled:
             self._set_status("已取消导出")
             return None
-        if policy == "仅导出审核通过":
-            selected = [(record, path) for record, path in zip(records, input_paths) if record.review_status == "approved"]
-            if not selected:
-                self._show_error("没有已审核片段", "当前没有审核通过的片段可导出。")
-                return None
-            records, input_paths = zip(*selected)
-            records, input_paths = list(records), list(input_paths)
-        warnings = export_quality_issues(self.project, require_approved=(policy == "仅导出审核通过"))
-        blocking = [issue for issue in warnings if issue.severity == "error"]
+        selected = select_records_for_scope(
+            records, input_paths, approved_only=scope.approved_only
+        )
+        if selected is None:
+            self._show_error("没有已审核片段", "当前没有审核通过的片段可导出。")
+            return None
+        filtered_records, filtered_paths = selected
+        blocking = blocking_export_issues(
+            self.project, approved_only=scope.approved_only
+        )
         if blocking:
-            text = "\n".join(issue.message for issue in blocking[:10])
+            text = format_blocking_issues(blocking)
             answer = QMessageBox.warning(self, "导出质量检查", text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
             if answer != QMessageBox.StandardButton.Yes:
                 self._set_status("质量检查未通过，已取消导出")
                 return None
-        return records, input_paths
+        return filtered_records, filtered_paths
 
     @staticmethod
     def _format_export_size(byte_count: int | None) -> str:
-        if byte_count is None:
-            return "无法估算"
-        size = float(byte_count)
-        for unit in ("B", "KB", "MB", "GB", "TB"):
-            if size < 1024 or unit == "TB":
-                return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
-            size /= 1024
-        return f"{int(byte_count)} B"
+        return format_export_size(byte_count)
 
     @staticmethod
     def _estimate_export_bytes(
         records: Sequence[ClipRecord], input_paths: Sequence[Path]
     ) -> int | None:
-        grouped: dict[Path, list[ClipRecord]] = {}
-        for record, source_path in zip(records, input_paths):
-            grouped.setdefault(Path(source_path), []).append(record)
-
-        estimated_bytes = 0.0
-        has_estimate = False
-        for source_path, source_records in grouped.items():
-            try:
-                source_bytes = source_path.stat().st_size
-            except OSError:
-                continue
-            observed_duration = max(
-                record.end_seconds for record in source_records
-            )
-            selected_duration = sum(
-                record.end_seconds - record.start_seconds
-                for record in source_records
-            )
-            if observed_duration <= 0 or selected_duration <= 0:
-                continue
-            estimated_bytes += source_bytes * selected_duration / observed_duration
-            has_estimate = True
-        return round(estimated_bytes) if has_estimate else None
+        return estimate_export_bytes(records, input_paths)
 
     def _confirm_export_preview(
         self, records: Sequence[ClipRecord], input_paths: Sequence[Path]
     ) -> bool:
-        total_duration = sum(
-            record.end_seconds - record.start_seconds for record in records
-        )
-        estimate = self._estimate_export_bytes(records, input_paths)
-        estimate_text = self._format_export_size(estimate)
         answer = QMessageBox.question(
             self,
             "导出预览",
-            (
-                f"将导出 {len(records)} 个片段，合计时长 "
-                f"{format_seconds(total_duration)}。\n"
-                f"预计磁盘占用：{estimate_text}\n"
-                "估算按源视频平均码率计算，实际大小会随编码模式变化。\n\n"
-                "是否开始导出？"
-            ),
+            format_export_preview_message(records, input_paths),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -5335,14 +5300,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-            if not self.output_dir.is_dir():
-                raise OSError("输出路径不是文件夹")
-            outputs = [record.output.lower() for record in records]
-            if len(outputs) != len(set(outputs)):
-                raise ValueError("任务列表中包含重复的输出文件名。")
-            for record in records:
-                validate_output_filename(record.output)
+            ensure_export_targets_ready(self.output_dir, records)
         except (OSError, RuntimeError, ValueError) as error:
             self._show_error(
                 "无法开始导出", f"开始导出失败：{self._file_error_tip(error)}"
@@ -5353,6 +5311,9 @@ class MainWindow(QMainWindow):
             self._set_status("已取消导出")
             return
 
+        # 说明：以下编排有意保留在 MainWindow 而非抽到纯模块——
+        # resolve_ffmpeg/resolve_ffprobe 以本模块的名字被测试 monkeypatch；
+        # ExportWorker 是 QThread，信号连接、进度条与按钮状态均为 Qt 职责。
         try:
             ffmpeg = resolve_ffmpeg(self.ffmpeg_edit.text())
             ffprobe = resolve_ffprobe(ffmpeg)
