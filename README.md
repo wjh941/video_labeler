@@ -1,6 +1,6 @@
 # 视频片段标注工具（Video Segment Labeler）
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PySide6](https://img.shields.io/badge/GUI-PySide6%206.7-green) ![平台](https://img.shields.io/badge/平台-Windows-lightgrey)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PySide6](https://img.shields.io/badge/GUI-PySide6%206.7-green) ![平台](https://img.shields.io/badge/平台-Windows%20%7C%20Linux%20(3.12)-lightgrey) [![tests](https://github.com/wjh941/video_labeler/actions/workflows/test.yml/badge.svg)](https://github.com/wjh941/video_labeler/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 面向**标注员和小团队**的 Windows 桌面视频标注工具：给长视频的片段打**行为标签**，用 `.labelproj` 工程管理标注结果，并通过 **FFmpeg** 批量导出 MP4 片段。
 
@@ -191,6 +191,8 @@ python -m PyInstaller --noconfirm --clean VideoSegmentLabeler.spec
 python -m pytest -q
 ```
 
+推送即由 GitHub Actions 自动回归（`.github/workflows/test.yml`）：Windows（3.10 / 3.12）与 Ubuntu（3.12）矩阵，Qt 以 offscreen 模式渲染，`pytest-timeout` 单用例 120 秒兜底，防止模态框/事件循环问题挂起整个任务。
+
 依赖真实媒体文件的 FFmpeg 集成测试默认跳过；准备一个至少两秒的本地 MP4 后可运行：
 
 ```powershell
@@ -205,3 +207,4 @@ python -m pytest -q tests\test_ffmpeg_integration.py
 - 全工程导出会在开始前检查含片段的视频源是否存在；缺失源视频需要先用「定位缺失视频」恢复路径，且仅接受文件名的唯一匹配。
 - 数据集导出标注的是视频时间片段而非画面边界框，YOLO 标签导出不包含检测框坐标。
 - 打包产物使用 Windows 默认图标，仓库当前不含应用图标资源。
+- **平台支持**：产品按 Windows 设计（ffmpeg/ffprobe 解析与路径校验均以 Windows 为一等公民）；Linux 自 v1.x 起通过 CI 测试验证（Python 3.12），但打包与人工质检仅在 Windows 进行，未在 Linux 上做过端到端交付验证。
