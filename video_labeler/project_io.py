@@ -62,6 +62,9 @@ def project_to_dict(project: LabelProject) -> dict[str, Any]:
     videos = []
     for video in project.videos:
         _validate_video_id(video.id)
+        # resolve() 在 Windows/Linux 上都会把路径补全为当前 OS 的绝对路径
+        # (Windows 还会用当前盘符补全 "C:foo" 这类缺根路径),因此下面的
+        # is_absolute 只是防御断言:正常入口 add_or_activate_video 已保证绝对。
         absolute_path = Path(video.path).expanduser().resolve(strict=False)
         if not absolute_path.is_absolute():
             raise ValueError("video path must be absolute")
@@ -523,6 +526,8 @@ def _validated_export_queue_state(document: Any, base: Path | None = None) -> di
         raise ValueError("export queue keys are invalid")
     if not _is_int(document["version"]) or document["version"] not in (EXPORT_QUEUE_VERSION, 2):
         raise ValueError(f"export queue version must be {EXPORT_QUEUE_VERSION} or 2")
+    # 与 _validated_video 相同的平台语义:按当前 OS 判定绝对路径。
+    # v1 队列文件由 save_export_queue_state 用 resolve() 后的本机路径写出。
     output_dir = document["output_dir"]
     if output_dir is not None and (
         not isinstance(output_dir, str) or not Path(output_dir).is_absolute()
@@ -555,6 +560,11 @@ def _validated_video(document: Any) -> dict[str, Any]:
         raise ValueError("video entry is invalid")
     _validate_video_id(document["id"])
     path = document["path"]
+    # 平台差异(刻意行为):Path 在 Windows 上是 WindowsPath,盘符+根目录才判定
+    # 为绝对("C:/video.mp4" 是绝对,而 "/video.mp4" 不是);在 Linux/macOS 上是
+    # PosixPath,以 "/" 开头即为绝对("C:/video.mp4" 反而不算)。v1 工程文档始终
+    # 存 add_or_activate_video 解析后的本机绝对路径,按当前 OS 判定即可;跨机器
+    # 迁移工程请使用 v2 可重定位格式(path_base="project" 的相对路径)。
     if not isinstance(path, str) or not Path(path).is_absolute():
         raise ValueError("video path must be absolute")
     segments = document["segments"]

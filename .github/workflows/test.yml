@@ -10,9 +10,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 本工具声明仅支持 Windows(ffprobe 解析/路径校验均按 Windows 设计),
-        # Linux 用例存在真实的可移植性差距(path 校验顺序差异),移植是独立任务
-        os: [windows-latest]
+        # Windows 是主要支持平台;Linux 因测试套件里的 Windows 风格路径字面量
+        # ("C:/video.mp4" 在 POSIX 下不算绝对路径)曾整体失败,已改为平台无关
+        # 写法后重新纳入矩阵,防止可移植性回退
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
     env:

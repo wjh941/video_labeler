@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import pytest
 
@@ -42,13 +41,13 @@ def _event_record():
     )
 
 
-def test_project_io_roundtrips_events():
+def test_project_io_roundtrips_events(tmp_path):
     record = _event_record()
     project = project_io.new_project()
     project.videos = [
         project_io.ProjectVideo(
             id="v1",
-            path=Path("C:/tmp/v.mp4"),
+            path=tmp_path / "v.mp4",
             segments=[record],
         )
     ]

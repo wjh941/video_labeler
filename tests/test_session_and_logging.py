@@ -46,13 +46,16 @@ def test_setup_logging_creates_one_rotating_file(isolated_appdata):
 
 def test_session_roundtrip_survives_corruption(isolated_appdata):
     assert session_io.load_session() == {}
+    # 路径字面量本身不是重点;期望值必须跟随 str(Path(...)) 的平台表示
+    # (Windows 会把 "/" 规范成反斜杠,Linux 保持原样),只验证 round-trip 不失真
+    project_path = Path("D:/labels/demo.labelproj")
     session_io.save_session(
-        project_path=Path("D:/labels/demo.labelproj"),
+        project_path=project_path,
         video_path="D:/merged/a.mp4",
         position_ms=83_500,
     )
     state = session_io.load_session()
-    assert state["project_path"] == "D:\\labels\\demo.labelproj"
+    assert state["project_path"] == str(project_path)
     assert state["video_path"] == "D:/merged/a.mp4"
     assert state["position_ms"] == 83_500
     session_io.session_path().write_text("{corrupt", encoding="utf-8")

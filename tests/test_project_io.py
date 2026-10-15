@@ -1,8 +1,20 @@
+import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from video_labeler.models import ClipRecord
+
+
+def absolute_video_path(name: str) -> str:
+    """构造平台无关的绝对路径文档值。
+
+    project_io 的校验按当前 OS 判定 is_absolute():Windows 上 "C:/x.mp4" 是
+    绝对路径,Linux 上则是普通相对名。测试文档里的路径必须用本函数生成,
+    才能在两个平台上都通过 "video path must be absolute" 校验。
+    """
+    return str(Path.cwd() / name)
 
 
 def test_project_round_trip_preserves_absolute_paths_segments_and_settings(tmp_path):
@@ -171,7 +183,7 @@ def test_project_loader_rejects_segments_with_an_invalid_time_range():
                 "videos": [
                     {
                         "id": "video-1",
-                        "path": "C:/video.mp4",
+                        "path": absolute_video_path("video.mp4"),
                         "segments": [
                             {
                                 "source": "video.mp4",
@@ -208,28 +220,29 @@ def test_legacy_project_without_segment_note_loads_an_empty_note(tmp_path):
     from video_labeler.project_io import load_project
 
     target = tmp_path / "legacy.labelproj"
-    target.write_text(
-        """{
-          "version": 1,
-          "active_video_id": "video-1",
-          "global_settings": {},
-          "videos": [{
+    document = {
+        "version": 1,
+        "active_video_id": "video-1",
+        "global_settings": {},
+        "videos": [{
             "id": "video-1",
-            "path": "C:/camera.mp4",
+            "path": absolute_video_path("camera.mp4"),
             "segments": [{
-              "source": "camera.mp4",
-              "start_seconds": 1,
-              "end_seconds": 2,
-              "output": "clip.mp4",
-              "behaviors": [],
-              "polarity": "",
-              "lighting": "",
-              "sequence": 1,
-              "status": "queued",
-              "error": ""
-            }]
-          }]
-        }""",
+                "source": "camera.mp4",
+                "start_seconds": 1,
+                "end_seconds": 2,
+                "output": "clip.mp4",
+                "behaviors": [],
+                "polarity": "",
+                "lighting": "",
+                "sequence": 1,
+                "status": "queued",
+                "error": "",
+            }],
+        }],
+    }
+    target.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -339,7 +352,9 @@ def test_project_loader_rejects_invalid_version_but_keeps_missing_paths(tmp_path
                 "version": 1,
                 "active_video_id": "missing",
                 "global_settings": {},
-                "videos": [{"id": "video-1", "path": "C:/video.mp4", "segments": []}],
+                "videos": [
+                    {"id": "video-1", "path": absolute_video_path("video.mp4"), "segments": []}
+                ],
             },
             "active_video_id",
         ),
@@ -349,8 +364,8 @@ def test_project_loader_rejects_invalid_version_but_keeps_missing_paths(tmp_path
                 "active_video_id": "duplicate",
                 "global_settings": {},
                 "videos": [
-                    {"id": "duplicate", "path": "C:/video.mp4", "segments": []},
-                    {"id": "duplicate", "path": "C:/other.mp4", "segments": []},
+                    {"id": "duplicate", "path": absolute_video_path("video.mp4"), "segments": []},
+                    {"id": "duplicate", "path": absolute_video_path("other.mp4"), "segments": []},
                 ],
             },
             "duplicate",
@@ -363,7 +378,7 @@ def test_project_loader_rejects_invalid_version_but_keeps_missing_paths(tmp_path
                 "videos": [
                     {
                         "id": "video-1",
-                        "path": "C:/video.mp4",
+                        "path": absolute_video_path("video.mp4"),
                         "segments": [{"source": "video.mp4"}],
                     }
                 ],
