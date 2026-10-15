@@ -26,7 +26,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+      - name: 安装 Qt 系统依赖(Ubuntu offscreen 渲染)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
       - name: 语法检查
         run: python -m compileall video_labeler
       - name: 运行测试(单用例 120s 超时,防模态框/事件循环挂起拖死整个 job)
-        run: pytest -q --timeout=120 --timeout-method=thread
+        # python -m 而非裸 pytest:把仓库根目录加入 sys.path,包才能被导入
+        run: python -m pytest -q --timeout=120 --timeout-method=thread
