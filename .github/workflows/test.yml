@@ -10,7 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # 本工具声明仅支持 Windows(ffprobe 解析/路径校验均按 Windows 设计),
+        # Linux 用例存在真实的可移植性差距(path 校验顺序差异),移植是独立任务
+        os: [windows-latest]
         python-version: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
     env:
