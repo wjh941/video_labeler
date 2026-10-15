@@ -64,14 +64,15 @@ def _offer_session_restore(window: MainWindow) -> None:
     total_seconds = int(state.get("position_ms") or 0) // 1000
     minutes, seconds = divmod(total_seconds, 60)
     lines.append(f"上次播放位置：{minutes}:{seconds:02d}")
-    answer = QMessageBox.question(
-        window,
-        "恢复上次会话",
-        "检测到上次的工作状态：\n" + "\n".join(lines) + "\n\n是否恢复？",
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.Yes,
-    )
-    if answer == QMessageBox.StandardButton.Yes:
+    # PySide6 的静态 question() 传按钮标志(无论位置还是关键字)都会因
+    # StandardButton/StandardButtons 类型不匹配抛 TypeError,导致有会话记录时启动崩溃;
+    # 实例化写法在各 PySide6 版本下均稳定
+    box = QMessageBox(window)
+    box.setWindowTitle("恢复上次会话")
+    box.setText("检测到上次的工作状态：\n" + "\n".join(lines) + "\n\n是否恢复？")
+    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    box.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if box.exec() == QMessageBox.StandardButton.Yes:
         window.apply_session_state(state)
 
 
