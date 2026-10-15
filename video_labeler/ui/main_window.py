@@ -112,6 +112,7 @@ from ..models import (
     FAMILIARITY_VALUES,
     LIGHTING_VALUES,
     POLARITIES,
+    REVIEW_STATUSES,
     REVIEW_STATUS_LABELS,
     STRATUM_LABELS,
     STRATUM_VALUES,
@@ -119,6 +120,16 @@ from ..models import (
     ClipRecord,
     EventRecord,
     ProjectMetadata,
+)
+from ..clip_rules import (
+    apply_review_transition,
+    assert_output_is_unique,
+    dialog_review_rejection_reason,
+    fast_review_rejection_reason,
+    finalize_clip_record,
+    merge_recent_behavior_tags,
+    utc_now_stamp,
+    validate_clip_bounds,
 )
 from ..naming import (
     ParsedFilename,
@@ -3946,14 +3957,9 @@ class MainWindow(QMainWindow):
 
     def add_or_update_clip(self) -> bool:
         try:
-            source = self.source_name.strip()
-            if not source:
-                raise ValueError("添加片段前请先选择源视频。")
             start_seconds = self.start_spin.value()
             end_seconds = self.end_spin.value()
-            if end_seconds <= start_seconds:
-                raise ValueError("结束时间必须晚于开始时间。")
-
+            source = validate_clip_bounds(self.source_name, start_seconds, end_seconds)
             metadata = ProjectMetadata(
                 date=self.date_edit.text().strip(),
                 camera=self.camera_edit.text().strip(),
@@ -3967,7 +3973,9 @@ class MainWindow(QMainWindow):
             output = build_filename(
                 metadata, behaviors, polarity, lighting, sequence
             )
-            self._assert_output_is_unique(output)
+            assert_output_is_unique(
+                self.records, output, editing_index=self._editing_index
+            )
         except ValueError as error:
             self._show_error("无法添加片段", f"添加片段失败：{error}")
             return False
@@ -3991,21 +3999,19 @@ class MainWindow(QMainWindow):
         )
         before = list(self.records)
         is_new_record = self._editing_index is None
-        now_stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        now_stamp = utc_now_stamp()
         previous = (
             self.records[self._editing_index]
             if not is_new_record
             else None
         )
-        record.annotator = (
-            (previous.annotator if previous is not None else "")
-            or self.annotator_edit.text().strip()
-            or self._default_annotator()
+        finalize_clip_record(
+            record,
+            previous=previous,
+            editor_annotator=self.annotator_edit.text().strip(),
+            default_annotator=self._default_annotator(),
+            now_stamp=now_stamp,
         )
-        record.created_at = (
-            (previous.created_at if previous is not None else "") or now_stamp
-        )
-        record.updated_at = now_stamp
         if is_new_record:
             self.records.append(record)
             self._set_status(f"已添加片段 {sequence:03d}")
@@ -4021,10 +4027,9 @@ class MainWindow(QMainWindow):
             self.project_header.setChecked(False)
         self._mark_project_dirty()
         self._last_annotation_labels = (behaviors, polarity, lighting)
-        if behaviors:
-            self._recent_behavior_tags = tuple(
-                dict.fromkeys((*behaviors, *self._recent_behavior_tags))
-            )[:6]
+        self._recent_behavior_tags = merge_recent_behavior_tags(
+            self._recent_behavior_tags, behaviors
+        )
         self._prepare_next_clip(record.end_seconds)
         if is_new_record:
             self.task_table.scrollToBottom()
@@ -4263,36 +4268,19 @@ class MainWindow(QMainWindow):
             self._set_status("没有选中片段进行审核")
             return
         before = list(self.records)
-        reviewed_at = (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
+        reviewed_at = utc_now_stamp()
+        fallback_annotator = (
+            self.annotator_edit.text().strip() or self._default_annotator()
         )
-        rejection_reason = {
-            "needs_fix": "快速审核：需修正",
-            "rejected": "快速审核：剔除",
-        }.get(review_status, "")
         for index in indexes:
-            record = self.records[index]
-            record.review_status = review_status
-            record.reviewer = "local-user" if review_status != "pending" else ""
-            record.reviewed_at = reviewed_at if review_status != "pending" else ""
-            record.review_comment = ""
-            record.rejection_reason = rejection_reason
-            record.updated_at = reviewed_at
-            if not record.annotator:
-                record.annotator = (
-                    self.annotator_edit.text().strip()
-                    or self._default_annotator()
-                )
-            record.review_history.append({
-                "status": review_status,
-                "reviewer": record.reviewer,
-                "reviewed_at": record.reviewed_at,
-                "comment": record.review_comment,
-                "rejection_reason": record.rejection_reason,
-            })
+            apply_review_transition(
+                self.records[index],
+                review_status,
+                reviewer="local-user",
+                reviewed_at=reviewed_at,
+                rejection_reason=fast_review_rejection_reason(review_status),
+                fallback_annotator=fallback_annotator,
+            )
         self._refresh_table()
         self._mark_project_dirty()
         history = self._active_history(create=True)
@@ -4546,9 +4534,9 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 combo.setCurrentIndex(index)
         self.person_count_spin.setValue(last.person_count)
-        self._recent_behavior_tags = tuple(
-            dict.fromkeys((*last.behaviors, *self._recent_behavior_tags))
-        )[:6]
+        self._recent_behavior_tags = merge_recent_behavior_tags(
+            self._recent_behavior_tags, last.behaviors
+        )
         if not silent:
             self._set_status(f"已沿用片段 {last.sequence:03d} 的标签设置")
 
@@ -4616,9 +4604,9 @@ class MainWindow(QMainWindow):
             self.filename_preview.clear()
 
     def _assert_output_is_unique(self, output: str) -> None:
-        for index, record in enumerate(self.records):
-            if index != self._editing_index and record.output.lower() == output.lower():
-                raise ValueError(f"输出文件名重复：{output}")
+        assert_output_is_unique(
+            self.records, output, editing_index=self._editing_index
+        )
 
     def _refresh_table(self) -> None:
         with QSignalBlocker(self.task_table):
@@ -4834,28 +4822,21 @@ class MainWindow(QMainWindow):
             if not accepted:
                 return
             review_comment = comment.strip()
-            rejection_reason = review_comment if review_status in {"needs_fix", "rejected"} else ""
-        reviewed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            rejection_reason = dialog_review_rejection_reason(review_status, review_comment)
+        reviewed_at = utc_now_stamp()
+        fallback_annotator = (
+            self.annotator_edit.text().strip() or self._default_annotator()
+        )
         for index in indexes:
-            record = self.records[index]
-            record.review_status = review_status
-            record.reviewer = reviewer if review_status != "pending" else ""
-            record.reviewed_at = reviewed_at if review_status != "pending" else ""
-            record.review_comment = review_comment if review_status != "pending" else ""
-            record.rejection_reason = rejection_reason
-            record.updated_at = reviewed_at
-            if not record.annotator:
-                record.annotator = (
-                    self.annotator_edit.text().strip()
-                    or self._default_annotator()
-                )
-            record.review_history.append({
-                "status": review_status,
-                "reviewer": record.reviewer,
-                "reviewed_at": record.reviewed_at,
-                "comment": record.review_comment,
-                "rejection_reason": record.rejection_reason,
-            })
+            apply_review_transition(
+                self.records[index],
+                review_status,
+                reviewer=reviewer,
+                reviewed_at=reviewed_at,
+                review_comment=review_comment,
+                rejection_reason=rejection_reason,
+                fallback_annotator=fallback_annotator,
+            )
         self._refresh_table()
         self._mark_project_dirty()
         history = self._active_history(create=True)
