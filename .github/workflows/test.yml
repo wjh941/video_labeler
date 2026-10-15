@@ -15,6 +15,11 @@ jobs:
         # 写法后重新纳入矩阵,防止可移植性回退
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.12"]
+        exclude:
+          # ubuntu + 3.10 的旧 PySide6 轮子在 Qt Multimedia 处理假媒体文件时
+          # 原生崩溃(SIGABRT),非测试失败;3.10 仅在 Windows 上验证
+          - os: ubuntu-latest
+            python-version: "3.10"
     runs-on: ${{ matrix.os }}
     env:
       # Qt 离屏渲染:CI 无显示服务器也可跑 UI 相关测试
