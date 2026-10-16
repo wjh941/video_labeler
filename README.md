@@ -7,6 +7,15 @@
 - 基于 **PySide6** 构建，界面为简体中文
 - 克隆仓库后按下方「快速开始」装好依赖，运行 `python app.py` 即可启动
 
+## 🧪 质量信号
+
+266 个自动化测试（含 Qt 离屏 UI 测试、工程格式迁移、导出队列与审核流边界用例），GitHub Actions 在 Windows 3.10/3.12 + Ubuntu 3.12 三环境对每次推送强制执行：
+
+```text
+$ python -m pytest -q
+266 passed, 1 skipped, 5 warnings in 39.50s
+```
+
 ## 功能特性
 
 | 能力 | 说明 |
