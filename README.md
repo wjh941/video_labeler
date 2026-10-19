@@ -1,5 +1,7 @@
 # 视频片段标注工具（Video Segment Labeler）
 
+> **“数据和特征决定了机器学习的上限，而模型和算法只是逼近这个上限而已。”** —— 吴恩达
+
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PySide6](https://img.shields.io/badge/GUI-PySide6%206.7-green) ![平台](https://img.shields.io/badge/平台-Windows%20%7C%20Linux%20(3.12)-lightgrey) [![tests](https://github.com/wjh941/video_labeler/actions/workflows/test.yml/badge.svg)](https://github.com/wjh941/video_labeler/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 面向**标注员和小团队**的 Windows 桌面视频标注工具：给长视频的片段打**行为标签**，用 `.labelproj` 工程管理标注结果，并通过 **FFmpeg** 批量导出 MP4 片段。
