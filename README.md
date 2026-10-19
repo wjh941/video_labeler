@@ -1,6 +1,6 @@
 # 视频片段标注工具（Video Segment Labeler）
 
-> **“数据和特征决定了机器学习的上限，而模型和算法只是逼近这个上限而已。”** —— 吴恩达
+> 🎬 **使用场景**：训练行为识别模型需要大量"哪段视频、什么时间、发生了什么"的标注。人工逐帧看视频打标签又慢又乱——这个桌面工具让标注员用快捷键和审核流批量搞定，导出即用的数据集。
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PySide6](https://img.shields.io/badge/GUI-PySide6%206.7-green) ![平台](https://img.shields.io/badge/平台-Windows%20%7C%20Linux%20(3.12)-lightgrey) [![tests](https://github.com/wjh941/video_labeler/actions/workflows/test.yml/badge.svg)](https://github.com/wjh941/video_labeler/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
